@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Morphos Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .video-container {
+            position: relative;
+        }
+        #videoElement {
+            width: 640px;
+            height: 480px;
+            background-color: #ddd;
+            border: 1px solid #999;
+        }
+        #canvasElement {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 640px;
+            height: 480px;
+            pointer-events: none;
+        }
+        #controls {
+            margin-top: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            margin-right: 10px;
+        }
+        #results {
+            width: 100%;
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f9f9f9;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>Morphos Test Client</h1>
+    <div class="container">
+        <div class="video-container">
+            <video id="videoElement" autoplay playsinline></video>
+            <canvas id="canvasElement"></canvas>
+        </div>
+        <div id="controls">
+            <button id="startButton">Start</button>
+            <button id="stopButton" disabled>Stop</button>
+            <label for="analysisUrl">Backend URL:</label>
+            <input type="text" id="analysisUrl" value="http://localhost:8080/ws/" style="width: 250px;">
+        </div>
+        <div>
+            <h3>Results:</h3>
+            <pre id="results">Waiting for analysis...</pre>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('canvasElement');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const analysisUrl = document.getElementById('analysisUrl');
+        const resultsElement = document.getElementById('results');
+        
+        let socket = null;
+        let streaming = false;
+        let animationFrame = null;
+        
+        // Set canvas dimensions to match video
+        canvas.width = 640;
+        canvas.height = 480;
+        
+        // Initialize webcam
+        async function initCamera() {
+            try {
+                const constraints = {
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        frameRate: { ideal: 30 }
+                    }
+                };
+                
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                
+                return new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        resolve(true);
+                    };
+                });
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                alert("Error accessing camera: " + err.message);
+                return false;
+            }
+        }
+        
+        // Connect to WebSocket server
+        function connectWebSocket() {
+            // Generate a random client ID
+            const clientId = 'client_' + Math.random().toString(36).substring(2, 15);
+            const wsUrl = analysisUrl.value + clientId;
+            
+            log(`Connecting to WebSocket: ${wsUrl}`);
+            
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = function() {
+                log("WebSocket connection established");
+                startStreaming();
+            };
+            
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'heartbeat') {
+                    // Handle heartbeat silently
+                    return;
+                }
+                
+                log("Received analysis: " + JSON.stringify(data, null, 2));
+                
+                // Draw bounding boxes if available
+                if (data.boxes && data.boxes.length > 0) {
+                    drawDetections(data.boxes);
+                }
+            };
+            
+            socket.onclose = function() {
+                log("WebSocket connection closed");
+                stopStreaming();
+            };
+            
+            socket.onerror = function(error) {
+                log("WebSocket error: " + error);
+                stopStreaming();
+            };
+        }
+        
+        // Draw bounding boxes on canvas
+        function drawDetections(boxes) {
+            // Clear previous drawings
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Set drawing styles
+            ctx.lineWidth = 3;
+            ctx.font = '14px Arial';
+            ctx.textBaseline = 'top';
+            
+            boxes.forEach(box => {
+                // Generate a color based on class_id
+                const hue = (box.class_id * 137) % 360; // Distribute colors
+                ctx.strokeStyle = `hsl(${hue}, 100%, 40%)`;
+                ctx.fillStyle = `hsl(${hue}, 100%, 40%)`;
+                
+                // Draw bounding box
+                ctx.beginPath();
+                ctx.rect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
+                ctx.stroke();
+                
+                // Draw label background
+                const label = `${box.class_name} ${Math.round(box.confidence * 100)}%`;
+                const textWidth = ctx.measureText(label).width;
+                ctx.fillRect(box.x1, box.y1, textWidth + 10, 20);
+                
+                // Draw label text
+                ctx.fillStyle = 'white';
+                ctx.fillText(label, box.x1 + 5, box.y1);
+            });
+        }
+        
+        // Start streaming frames
+        function startStreaming() {
+            if (streaming) return;
+            
+            streaming = true;
+            startButton.disabled = true;
+            stopButton.disabled = false;
+            
+            // Function to capture and send frames
+            function captureAndSend() {
+                if (!streaming) return;
+                
+                // Draw current video frame to canvas
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Get frame as base64 encoded image
+                const imageData = canvas.toDataURL('image/jpeg', 0.7);
+                
+                // Send to server if connection is open
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(imageData);
+                }
+                
+                // Schedule next frame
+                animationFrame = requestAnimationFrame(captureAndSend);
+            }
+            
+            // Start the capture loop
+            captureAndSend();
+        }
+        
+        // Stop streaming
+        function stopStreaming() {
+            streaming = false;
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            
+            if (animationFrame) {
+                cancelAnimationFrame(animationFrame);
+            }
+            
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+        
+        // Log message to results area
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            resultsElement.innerText = `[${timestamp}] ${message}\n\n` + resultsElement.innerText;
+        }
+        
+        // Event listeners
+        startButton.addEventListener('click', async () => {
+            // Initialize camera if not already done
+            if (!video.srcObject) {
+                const success = await initCamera();
+                if (!success) return;
+            }
+            
+            connectWebSocket();
+        });
+        
+        stopButton.addEventListener('click', () => {
+            stopStreaming();
+        });
+        
+        // Initialize camera on page load
+        initCamera().then(() => {
+            log("Camera initialized. Click 'Start' to begin analysis.");
+        });
+    </script>
+</body>
+</html>

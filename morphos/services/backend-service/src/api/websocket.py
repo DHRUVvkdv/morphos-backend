@@ -2,14 +2,17 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
 import logging
 import json
 import base64
-import io
 import cv2
 import numpy as np
 import asyncio
-from typing import Dict, Any
+import aiohttp
+import os
+import time
+from typing import Dict, Any, List, Optional
 
 from core.managers import ConnectionManager
 from core.security import verify_token
+from config.settings import Settings
 
 logger = logging.getLogger("morphos-websocket")
 websocket_router = APIRouter()
@@ -17,38 +20,130 @@ websocket_router = APIRouter()
 # Initialize the connection manager
 manager = ConnectionManager()
 
+# Load settings
+settings = Settings()
 
-async def process_frame(frame_data: np.ndarray, client_id: str) -> Dict[str, Any]:
+# Initialize session storage for tracking client state
+session_data = {}
+
+
+async def call_inference_service(frame_data: str) -> Dict[str, Any]:
     """
-    Process a video frame through ML models.
-    This will be expanded to call the Dynamo inference service.
+    Call the inference service with a video frame
 
     Args:
-        frame_data: The video frame as a numpy array
-        client_id: The client ID for the connection
+        frame_data: Base64 encoded image data
 
     Returns:
-        Dict containing analysis results
+        Dict containing analysis results from the inference service
     """
-    # TODO: Implement actual call to Dynamo inference service
-    # For now return mock data
-    return {
-        "keypoints": [{"x": 100, "y": 100}, {"x": 150, "y": 150}],  # Example keypoints
-        "emotion": "focused",
-        "rep_count": 0,
-        "form_quality": "good",
-    }
+    inference_url = os.environ.get(
+        "INFERENCE_SERVICE_URL", "http://inference-service:8000"
+    )
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{inference_url}/inference",
+                json={"image": frame_data},
+                timeout=aiohttp.ClientTimeout(total=5),  # 5s timeout
+            ) as response:
+                if response.status != 200:
+                    logger.error(f"Inference service error: {response.status}")
+                    return {"error": f"Inference service error: {response.status}"}
+
+                return await response.json()
+    except asyncio.TimeoutError:
+        logger.error("Inference service timeout")
+        return {"error": "Inference service timeout"}
+    except Exception as e:
+        logger.error(f"Error calling inference service: {str(e)}")
+        return {"error": f"Error calling inference service: {str(e)}"}
+
+
+class RepCounter:
+    """Simple rep counter based on keypoint movement"""
+
+    def __init__(self, keypoint_idx=9):  # Index 9 is typically mid-hip in COCO format
+        self.keypoint_idx = keypoint_idx
+        self.positions = []
+        self.max_positions = 10  # Store last N positions
+        self.going_up = None
+        self.rep_count = 0
+        self.last_rep_time = 0
+
+    def update(self, keypoints: List[Dict[str, Any]]) -> int:
+        """Update with new keypoints and determine if a rep was completed"""
+        if not keypoints or len(keypoints) <= self.keypoint_idx:
+            return self.rep_count
+
+        # Get current Y position of tracked keypoint
+        current_y = keypoints[self.keypoint_idx].get("y", 0)
+        current_confidence = keypoints[self.keypoint_idx].get("confidence", 0)
+
+        # If confidence is too low, skip this update
+        if current_confidence < 0.5:
+            return self.rep_count
+
+        # Add to position history
+        self.positions.append(current_y)
+        if len(self.positions) > self.max_positions:
+            self.positions.pop(0)
+
+        # Need at least a few positions to detect movement
+        if len(self.positions) < 3:
+            return self.rep_count
+
+        # Detect direction
+        avg_prev = sum(self.positions[:-1]) / (len(self.positions) - 1)
+        direction_up = current_y < avg_prev
+
+        # Detect rep on direction change
+        if self.going_up is not None and self.going_up != direction_up:
+            # Direction changed
+            current_time = time.time()
+
+            # Ensure minimum time between reps (0.5 sec) to avoid double counting
+            if current_time - self.last_rep_time > 0.5:
+                # Only count if movement exceeds threshold
+                if (
+                    abs(max(self.positions) - min(self.positions)) > 0.15
+                ):  # Threshold for movement
+                    self.rep_count += 1
+                    self.last_rep_time = current_time
+
+        self.going_up = direction_up
+        return self.rep_count
+
+
+def analyze_form(keypoints: List[Dict[str, Any]], exercise_type: str = "squat") -> str:
+    """
+    Simple form analysis based on keypoint positions
+
+    Args:
+        keypoints: List of keypoints from pose detection
+        exercise_type: Type of exercise being performed
+
+    Returns:
+        Form assessment: "good", "check_knees", "check_back", "check_depth", etc.
+    """
+    # This is a simplified placeholder for form analysis
+    if not keypoints or len(keypoints) < 10:  # Need at least basic keypoints
+        return "unknown"
+
+    # For this demo, just return a static result
+    # In a real implementation, you would analyze the angles between joints
+    return "good"
 
 
 @websocket_router.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str, token: str = None):
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """
     WebSocket endpoint for real-time video processing
 
     Args:
         websocket: The WebSocket connection
         client_id: Client identifier
-        token: Authentication token (optional for now)
     """
     # Accept the connection
     await manager.connect(websocket, client_id)
@@ -56,34 +151,89 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str, token: str = 
     # Set up a heartbeat task
     heartbeat_task = asyncio.create_task(manager.heartbeat(client_id))
 
+    # Initialize session data for this client if it doesn't exist
+    if client_id not in session_data:
+        session_data[client_id] = {
+            "rep_counter": RepCounter(),
+            "exercise_type": "squat",  # Default exercise type
+            "last_frame_time": time.time(),
+            "processed_frames": 0,
+        }
+
     try:
         while True:
             # Receive frame from client
             data = await websocket.receive_text()
 
-            # Process the received frame (base64 encoded image)
-            try:
-                # Decode base64 image
-                encoded_data = data.split(",")[1] if "," in data else data
-                frame_bytes = base64.b64decode(encoded_data)
-                frame_array = np.frombuffer(frame_bytes, dtype=np.uint8)
-                frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+            # Check if it's a control message (JSON)
+            if data.startswith("{"):
+                try:
+                    control_data = json.loads(data)
 
-                # Process the frame
-                analysis_results = await process_frame(frame, client_id)
+                    # Handle exercise type change
+                    if "exercise_type" in control_data:
+                        session_data[client_id]["exercise_type"] = control_data[
+                            "exercise_type"
+                        ]
+                        session_data[client_id][
+                            "rep_counter"
+                        ] = RepCounter()  # Reset counter
 
-                # Send results back to client
-                await manager.send_message(client_id, analysis_results)
+                    # Handle reset command
+                    if control_data.get("action") == "reset":
+                        session_data[client_id]["rep_counter"] = RepCounter()
 
-            except Exception as e:
-                logger.error(f"Error processing frame: {str(e)}")
-                await websocket.send_json({"error": str(e)})
+                    await websocket.send_json({"status": "ok"})
+                    continue
+                except json.JSONDecodeError:
+                    pass  # Not a valid JSON, treat as image data
+
+            # Update frame timing statistics
+            current_time = time.time()
+            elapsed = current_time - session_data[client_id]["last_frame_time"]
+            session_data[client_id]["last_frame_time"] = current_time
+            session_data[client_id]["processed_frames"] += 1
+
+            # Log occasional statistics
+            if session_data[client_id]["processed_frames"] % 100 == 0:
+                logger.info(
+                    f"Client {client_id}: Processed {session_data[client_id]['processed_frames']} frames, {1/elapsed:.2f} FPS"
+                )
+
+            # Call the inference service
+            analysis_results = await call_inference_service(data)
+
+            # Handle errors from inference service
+            if "error" in analysis_results:
+                await websocket.send_json(analysis_results)
+                continue
+
+            # Extract keypoints and update rep counter
+            keypoints = []
+            if "keypoints" in analysis_results:
+                keypoints = analysis_results["keypoints"]
+                rep_count = session_data[client_id]["rep_counter"].update(keypoints)
+                analysis_results["rep_count"] = rep_count
+
+            # Analyze form if we have keypoints
+            if keypoints:
+                form_quality = analyze_form(
+                    keypoints, session_data[client_id]["exercise_type"]
+                )
+                analysis_results["form_quality"] = form_quality
+
+            # Send results back to client
+            await websocket.send_json(analysis_results)
 
     except WebSocketDisconnect:
         # Clean up on disconnect
+        logger.info(
+            f"Client {client_id} disconnected after processing {session_data[client_id]['processed_frames']} frames"
+        )
         heartbeat_task.cancel()
         manager.disconnect(client_id)
+        # Keep session data for a while in case client reconnects
     except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}")
+        logger.error(f"WebSocket error for client {client_id}: {str(e)}")
         heartbeat_task.cancel()
         manager.disconnect(client_id)
