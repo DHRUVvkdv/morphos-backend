@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Morphos WebSocket Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #messages { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; margin-bottom: 10px; }
+        #input { width: 80%; padding: 5px; }
+        button { padding: 5px 10px; }
+    </style>
+</head>
+<body>
+    <h1>Morphos WebSocket Test</h1>
+    <div id="messages"></div>
+    <input type="text" id="input" placeholder="Type a message...">
+    <button onclick="sendMessage()">Send</button>
+    
+    <script>
+        // Generate a random client ID
+        const clientId = 'test-' + Math.floor(Math.random() * 1000);
+        const wsUrl = `ws://localhost:8080/ws/${clientId}`;
+        let socket;
+        
+        // Connect to WebSocket
+        function connect() {
+            appendMessage('System', 'Connecting...');
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = function(e) {
+                appendMessage('System', 'Connected!');
+            };
+            
+            socket.onmessage = function(event) {
+                appendMessage('Server', event.data);
+            };
+            
+            socket.onclose = function(event) {
+                appendMessage('System', 'Connection closed. Reconnecting in 3 seconds...');
+                setTimeout(connect, 3000);
+            };
+            
+            socket.onerror = function(error) {
+                appendMessage('System', 'Error: ' + error.message);
+            };
+        }
+        
+        // Send a message
+        function sendMessage() {
+            const input = document.getElementById('input');
+            const message = input.value;
+            
+            if (message && socket.readyState === WebSocket.OPEN) {
+                socket.send(message);
+                appendMessage('You', message);
+                input.value = '';
+            }
+        }
+        
+        // Append a message to the messages div
+        function appendMessage(sender, message) {
+            const messagesDiv = document.getElementById('messages');
+            const messageElement = document.createElement('div');
+            messageElement.innerHTML = `<strong>${sender}:</strong> ${message}`;
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        // Listen for Enter key
+        document.getElementById('input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Connect when the page loads
+        window.onload = connect;
+    </script>
+</body>
+</html>
