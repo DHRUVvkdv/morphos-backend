@@ -2,6 +2,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import asyncio
+import os
+
+# Import your existing ConnectionManager
+from core.managers import ConnectionManager
 
 # Configure logging
 logging.basicConfig(
@@ -26,31 +30,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# Simple connection manager
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections = {}
-
-    async def connect(self, websocket: WebSocket, client_id: str):
-        await websocket.accept()
-        self.active_connections[client_id] = websocket
-        logger.info(
-            f"Client {client_id} connected. Total: {len(self.active_connections)}"
-        )
-
-    def disconnect(self, client_id: str):
-        if client_id in self.active_connections:
-            del self.active_connections[client_id]
-            logger.info(
-                f"Client {client_id} disconnected. Total: {len(self.active_connections)}"
-            )
-
-    async def send_message(self, client_id: str, message: dict):
-        if client_id in self.active_connections:
-            await self.active_connections[client_id].send_json(message)
-
-
 # Initialize connection manager
 manager = ConnectionManager()
 
@@ -67,21 +46,53 @@ async def health_check():
     return {"status": "ok"}
 
 
-# WebSocket endpoint
+# WebSocket endpoint with improved Cloud Run handling
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     await manager.connect(websocket, client_id)
+
+    # Start heartbeat task in the background
+    heartbeat_task = asyncio.create_task(manager.heartbeat(client_id, interval=30))
+
     try:
         while True:
-            # Echo back any received data (for testing)
-            data = await websocket.receive_text()
-            await websocket.send_text(f"You sent: {data}")
-            logger.info(f"Received message from {client_id}: {data[:50]}...")
+            # Use a shorter timeout than Cloud Run's 60s default
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=50)
+                await websocket.send_text(f"You sent: {data}")
+                logger.info(f"Received message from {client_id}: {data[:50]}...")
+            except asyncio.TimeoutError:
+                # The heartbeat task will handle sending pings
+                pass
     except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected for client {client_id}")
         manager.disconnect(client_id)
+        heartbeat_task.cancel()
+    except Exception as e:
+        logger.error(f"Error in WebSocket for client {client_id}: {str(e)}")
+        manager.disconnect(client_id)
+        heartbeat_task.cancel()
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)
+    # Get port from environment variable
+    port = int(os.environ.get("PORT", 8080))
+
+    # Log startup
+    logger.info(f"Starting server on port {port}")
+
+    # Run with explicit WebSocket support
+    # Note: disable reload in production (Cloud Run)
+    is_dev = os.environ.get("ENVIRONMENT", "").lower() != "production"
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        ws="websockets",  # Explicitly use the websockets implementation
+        log_level="info",
+        timeout_keep_alive=70,  # Helps with WebSocket connections
+        reload=is_dev,  # Only use reload in development
+    )

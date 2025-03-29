@@ -55,3 +55,5 @@ To deploy to Google Cloud:
 # Deploy to Google Cloud Run
 
 ./scripts/deploy.sh
+
+docker compose up --build
