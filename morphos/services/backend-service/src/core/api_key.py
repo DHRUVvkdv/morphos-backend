@@ -3,11 +3,43 @@
 from fastapi import Request, HTTPException, status
 import os
 import logging
+import sys
 from typing import Optional, List
 
 logger = logging.getLogger("morphos-api-key")
 
-# Get API key from environment variable or use a default one for development
+
+# Comprehensive logging of environment and API key
+def log_environment_details():
+    """Log detailed information about the environment"""
+    logger.info("--- Comprehensive Environment Investigation ---")
+
+    # Python interpreter and path details
+    logger.info(f"Python Executable: {sys.executable}")
+    logger.info(f"Python Path: {sys.path}")
+
+    # Current working directory
+    logger.info(f"Current Working Directory: {os.getcwd()}")
+
+    # Environment variables investigation
+    logger.info("--- Environment Variables Containing 'API_KEY' ---")
+    api_key_vars = {
+        key: value for key, value in os.environ.items() if "API_KEY" in key.upper()
+    }
+
+    for key, value in api_key_vars.items():
+        logger.info(f"{key}: {'*' * len(value)}")  # Mask the actual value
+
+    # Specific checks for API_KEY
+    logger.info("--- Specific API_KEY Checks ---")
+    logger.info(f"os.environ.get('API_KEY'): {os.environ.get('API_KEY')}")
+    logger.info(f"'API_KEY' in os.environ: {'API_KEY' in os.environ}")
+
+
+# Call the logging function
+log_environment_details()
+
+# Get API key from environment variable
 API_KEY = os.environ.get("API_KEY")
 EXEMPT_PATHS = ["/", "/health", "/docs", "/redoc", "/openapi.json"]
 
@@ -30,7 +62,26 @@ async def verify_api_key(request: Request) -> None:
     if request.method == "OPTIONS":
         return
 
-    api_key_header = request.headers.get("X-API-Key")
+    # Ultra-verbose logging
+    logger.info("--- API Key Verification ---")
+    logger.info(f"Request method: {request.method}")
+    logger.info(f"Request path: {request.url.path}")
+
+    # Log all request headers for debugging
+    logger.info("--- Request Headers ---")
+    for name, value in request.headers.items():
+        logger.info(f"{name}: {value}")
+
+    # Try multiple header variations
+    api_key_header = (
+        request.headers.get("X-API-Key")
+        or request.headers.get("API-Key")
+        or request.headers.get("x-api-key")
+    )
+
+    # Log API key details with maximum verbosity
+    logger.info(f"Effective API_KEY from environment: {API_KEY}")
+    logger.info(f"Received API key header: {api_key_header}")
 
     if not api_key_header:
         logger.warning(f"Missing API key for request to {request.url.path}")
@@ -41,10 +92,12 @@ async def verify_api_key(request: Request) -> None:
 
     if api_key_header != API_KEY:
         logger.warning(f"Invalid API key for request to {request.url.path}")
+        logger.warning(f"Expected key: {API_KEY}")
+        logger.warning(f"Received key: {api_key_header}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",
         )
 
     # If we reach here, the API key is valid
-    logger.debug(f"Valid API key for request to {request.url.path}")
+    logger.info(f"Valid API key for request to {request.url.path}")

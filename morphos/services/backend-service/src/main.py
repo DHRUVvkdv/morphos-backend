@@ -1,5 +1,15 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
+from fastapi import (
+    FastAPI,
+    WebSocket,
+    WebSocketDisconnect,
+    Request,
+    Depends,
+    HTTPException,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
+from fastapi.openapi.utils import get_openapi
 import logging
 import asyncio
 import os
@@ -8,6 +18,7 @@ from dotenv import load_dotenv
 import sys
 import traceback
 from core.api_key import verify_api_key
+from core.debug_api_key import debug_api_key_loading
 
 # Configure logging
 logging.basicConfig(
@@ -15,6 +26,19 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("morphos-main")
+
+# Load environment variables
+load_dotenv()
+
+debug_api_key_loading()
+
+
+# Import routers and database after environment is set up
+from api.auth_routes import router as auth_router
+from api.routes import router as main_router
+from api.profile_routes import router as profile_router
+from core.database import init_db
+from core.managers import ConnectionManager
 
 # Get absolute path to current directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -38,7 +62,7 @@ for env_path in possible_env_paths:
 if not env_loaded:
     logger.warning("No .env file found in any expected location")
 
-# ====== ENVIRONMENT VALIDATION (ADD THIS) ======
+# ====== ENVIRONMENT VALIDATION ======
 # Validate critical environment variables
 required_vars = [
     "AUTH0_DOMAIN",
@@ -96,8 +120,9 @@ from api.profile_routes import router as profile_router
 from core.database import init_db
 from core.managers import ConnectionManager
 
+# Initialize database
 db = init_db()
-if db is not None:  # Changed from "if db:" to "if db is not None:"
+if db is not None:
     logger.info("Database connection initialized successfully")
 
     # Ensure indexes for efficient queries
@@ -110,15 +135,45 @@ if db is not None:  # Changed from "if db:" to "if db is not None:"
 else:
     logger.warning("Database initialization failed or disabled")
 
+# Create security scheme
+api_key_scheme = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title="Morphos API Service",
+        version="0.1.0",
+        description="AI Workout Analysis API and WebSocket Service",
+        routes=app.routes,
+    )
+
+    # Add security scheme
+    openapi_schema["components"]["securitySchemes"] = {
+        "APIKeyHeader": {"type": "apiKey", "in": "header", "name": "X-API-Key"}
+    }
+
+    # Set global security requirement
+    openapi_schema["security"] = [{"APIKeyHeader": []}]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
 # Create FastAPI app
 app = FastAPI(
     title="Morphos API Service",
     description="AI Workout Analysis API and WebSocket Service",
     version="0.1.0",
-    dependencies=[
-        Depends(verify_api_key)
-    ],  # Add API key verification as a global dependency
+    # Add security definition to OpenAPI schema
+    swagger_ui_parameters={"defaultModelsExpandDepth": -1},
+    dependencies=[Depends(verify_api_key)],
 )
+
+app.openapi = custom_openapi
+
 
 # Configure CORS
 app.add_middleware(
@@ -160,7 +215,11 @@ async def health_check():
         "version": "0.1.0",
         "auth0_domain": os.environ.get("AUTH0_DOMAIN", "not set"),
         "api_key_enabled": True,
-        "api_key_value": "****" + os.environ.get("API_KEY")[-4:],
+        "api_key_value": (
+            "****" + os.environ.get("API_KEY")[-4:]
+            if os.environ.get("API_KEY")
+            else "not set"
+        ),
     }
 
 
