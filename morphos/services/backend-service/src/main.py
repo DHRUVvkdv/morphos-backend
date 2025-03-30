@@ -18,7 +18,6 @@ from dotenv import load_dotenv
 import sys
 import traceback
 from core.api_key import verify_api_key
-from core.debug_api_key import debug_api_key_loading
 
 # Configure logging
 logging.basicConfig(
@@ -29,8 +28,6 @@ logger = logging.getLogger("morphos-main")
 
 # Load environment variables
 load_dotenv()
-
-debug_api_key_loading()
 
 
 # Import routers and database after environment is set up

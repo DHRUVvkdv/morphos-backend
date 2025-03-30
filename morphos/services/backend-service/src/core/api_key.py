@@ -39,17 +39,17 @@ def log_environment_details():
 # Call the logging function
 log_environment_details()
 
+
 # Get API key from environment variable
-API_KEY = os.environ.get("API_KEY")
+def get_api_key():
+    """Get API key from environment, ensure it's only retrieved when needed"""
+    return os.environ.get("API_KEY")
+
+
 EXEMPT_PATHS = ["/", "/health", "/docs", "/redoc", "/openapi.json"]
 
 
 async def verify_api_key(request: Request) -> None:
-    """
-    Middleware to verify API key in header.
-
-    Raises HTTPException if API key is invalid or missing.
-    """
     # Skip API key verification for exempt paths
     if request.url.path in EXEMPT_PATHS or request.url.path.startswith("/static"):
         return
@@ -62,13 +62,15 @@ async def verify_api_key(request: Request) -> None:
     if request.method == "OPTIONS":
         return
 
+    # Get API key only when needed
+    api_key = get_api_key()
+
     # Ultra-verbose logging
     logger.info("--- API Key Verification ---")
     logger.info(f"Request method: {request.method}")
     logger.info(f"Request path: {request.url.path}")
 
     # Log all request headers for debugging
-    logger.info("--- Request Headers ---")
     for name, value in request.headers.items():
         logger.info(f"{name}: {value}")
 
@@ -80,7 +82,7 @@ async def verify_api_key(request: Request) -> None:
     )
 
     # Log API key details with maximum verbosity
-    logger.info(f"Effective API_KEY from environment: {API_KEY}")
+    logger.info(f"Effective API_KEY from environment: {api_key}")
     logger.info(f"Received API key header: {api_key_header}")
 
     if not api_key_header:
@@ -90,14 +92,17 @@ async def verify_api_key(request: Request) -> None:
             detail="Missing API key. Include X-API-Key header with your request.",
         )
 
-    if api_key_header != API_KEY:
+    if api_key_header != api_key:
         logger.warning(f"Invalid API key for request to {request.url.path}")
-        logger.warning(f"Expected key: {API_KEY}")
+        logger.warning(f"Expected key: {api_key}")
         logger.warning(f"Received key: {api_key_header}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",
         )
+
+    # If we reach here, the API key is valid
+    logger.info(f"Valid API key for request to {request.url.path}")
 
     # If we reach here, the API key is valid
     logger.info(f"Valid API key for request to {request.url.path}")
