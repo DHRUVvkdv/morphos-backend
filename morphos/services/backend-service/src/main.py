@@ -4,14 +4,20 @@ import logging
 import asyncio
 import os
 import json
-from api.auth_routes import router as auth_router
-from core.database import init_db
 from dotenv import load_dotenv
-import logging
-import pathlib
 
+# Import routers
+from api.auth_routes import router as auth_router
+from api.routes import router as main_router
+from api.profile_routes import router as profile_router  # New profile routes
+from core.database import init_db
+from core.managers import ConnectionManager
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 logger = logging.getLogger("morphos-main")
 
 # Get absolute path to current directory
@@ -36,27 +42,25 @@ for env_path in possible_env_paths:
 if not env_loaded:
     logger.warning("No .env file found in any expected location")
 
-# Print all environment variables for debugging
-logger.info("=== Environment Variables ===")
+# Print environment variables for debugging (exclude secrets)
 for key, value in os.environ.items():
-    if key.startswith("AUTH0_"):
-        if "SECRET" in key:
-            logger.info(f"{key}: {value[:3]}... (truncated)")
-        else:
-            logger.info(f"{key}: {value}")
+    if key.startswith("MONGODB_"):
+        logger.info(f"{key}: {'*****' if 'URI' in key else value}")
 
-init_db()
+# Initialize database
+db = init_db()
+if db:
+    logger.info("Database connection initialized successfully")
 
-
-from core.managers import ConnectionManager
-from api.routes import router
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
-logger = logging.getLogger("morphos-api")
+    # Ensure indexes for efficient queries
+    try:
+        db.users.create_index("email", unique=True)
+        db.users.create_index("auth0_id", unique=True)
+        logger.info("Database indexes created successfully")
+    except Exception as e:
+        logger.error(f"Error creating database indexes: {str(e)}")
+else:
+    logger.warning("Database initialization failed or disabled")
 
 # Create FastAPI app
 app = FastAPI(
@@ -65,19 +69,19 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.include_router(auth_router)
-
-# Configure CORS - simple approach
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for now
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API routes
-app.include_router(router)
+# Include routers
+app.include_router(auth_router)
+app.include_router(main_router)
+app.include_router(profile_router)  # Add profile routes
 
 # Initialize connection manager
 manager = ConnectionManager()
@@ -86,7 +90,24 @@ manager = ConnectionManager()
 # Basic health check endpoint
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    # Check database connection
+    db_status = "connected" if db else "disconnected"
+
+    # Additional health metrics
+    mongo_status = "ok"
+    if db:
+        try:
+            # Ping MongoDB to verify connection
+            db.command("ping")
+        except Exception as e:
+            mongo_status = f"error: {str(e)}"
+
+    return {
+        "status": "ok",
+        "database": db_status,
+        "mongo_status": mongo_status,
+        "version": "0.1.0",
+    }
 
 
 # Root endpoint
@@ -97,20 +118,21 @@ async def root():
         "status": "running",
         "version": "0.1.0",
         "websocket_endpoint": "/ws/{client_id}",
+        "database_connected": db is not None,
     }
 
 
-# Simple WebSocket endpoint without complex validation
+# WebSocket endpoint
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
-    # Accept the connection immediately
+    # Accept the connection
     await websocket.accept()
     logger.info(f"WebSocket connection accepted for client: {client_id}")
 
-    # Register with manager - don't call accept again
+    # Register with manager
     await manager.connect(websocket, client_id)
 
-    # Start heartbeat task in the background
+    # Start heartbeat task
     heartbeat_task = asyncio.create_task(manager.heartbeat(client_id, interval=15))
 
     try:
@@ -123,10 +145,27 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             # Receive data from client
             data = await websocket.receive_text()
 
-            # Echo back for now as a test
+            # Handle JSON messages separately
+            if data.startswith("{"):
+                try:
+                    json_data = json.loads(data)
+                    # Process JSON message (could be control commands)
+                    await websocket.send_json(
+                        {
+                            "status": "ok",
+                            "type": "json_response",
+                            "message": "JSON data received and processed",
+                        }
+                    )
+                    continue
+                except json.JSONDecodeError:
+                    pass  # Not valid JSON, process as regular message
+
+            # Echo back for video/binary data
             await websocket.send_json(
                 {
                     "status": "ok",
+                    "type": "data_received",
                     "received_data_length": len(data),
                     "message": "Data received successfully",
                 }

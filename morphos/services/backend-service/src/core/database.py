@@ -1,6 +1,7 @@
 from pymongo import MongoClient
-from config.auth import auth0_settings
 import logging
+import os
+from config.database import mongodb_settings
 
 logger = logging.getLogger("morphos-db")
 
@@ -13,11 +14,22 @@ def init_db():
     """Initialize database connection"""
     global client, db
 
-    if auth0_settings.MONGODB_URI:
+    # First try to use mongodb_settings
+    mongodb_uri = None
+    db_name = "morphos_db"
+
+    if mongodb_settings:
+        mongodb_uri = mongodb_settings.MONGODB_URI
+        db_name = mongodb_settings.MONGODB_DB_NAME
+    else:
+        # Fallback to direct environment variable
+        mongodb_uri = os.environ.get("MONGODB_URI")
+
+    if mongodb_uri:
         try:
-            client = MongoClient(auth0_settings.MONGODB_URI)
-            db = client[auth0_settings.MONGODB_DB_NAME]
-            logger.info(f"Connected to MongoDB: {auth0_settings.MONGODB_DB_NAME}")
+            client = MongoClient(mongodb_uri)
+            db = client[db_name]
+            logger.info(f"Connected to MongoDB: {db_name}")
 
             # Create indexes if they don't exist
             db.users.create_index("email", unique=True)
