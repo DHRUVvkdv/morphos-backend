@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 
-from core.auth import UserCreate, UserLogin, get_token, create_auth0_user
+from core.auth import (
+    UserCreate,
+    UserLogin,
+    get_token,
+    create_auth0_user,
+    custom_signin,
+)
 from core.database import get_db
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -18,11 +24,11 @@ class TokenResponse(BaseModel):
     token_type: str
 
 
-@router.post("/signup", response_model=TokenResponse)
+@router.post("/signup")
 async def signup(user_data: UserCreate):
     """Register a new user"""
-    # Create user in Auth0
     try:
+        # Create user in Auth0
         auth0_user = await create_auth0_user(
             user_data.email, user_data.password, user_data.name
         )
@@ -37,12 +43,11 @@ async def signup(user_data: UserCreate):
             }
             db.users.insert_one(user_doc)
 
-        # Get token
-        token_data = await get_token(user_data.email, user_data.password)
-
+        # Return success without trying to get a token
         return {
-            "access_token": token_data.access_token,
-            "token_type": token_data.token_type,
+            "status": "success",
+            "message": "User created successfully",
+            "user_id": auth0_user["user_id"],
         }
     except HTTPException:
         # Re-raise HTTP exceptions
@@ -58,12 +63,12 @@ async def signup(user_data: UserCreate):
 async def signin(user_data: UserLogin):
     """Authenticate user and return JWT token"""
     try:
-        token_data = await get_token(user_data.email, user_data.password)
-
-        return {
-            "access_token": token_data.access_token,
-            "token_type": token_data.token_type,
-        }
+        token_data = await custom_signin(user_data.email, user_data.password)
+        return TokenResponse(
+            access_token=token_data["access_token"],
+            token_type=token_data["token_type"],
+            expires_in=token_data["expires_in"],
+        )
     except HTTPException:
         # Re-raise HTTP exceptions
         raise

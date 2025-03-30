@@ -5,6 +5,7 @@ aiohttp
 opencv-python-headless==4.8.1.78
 numpy==1.24.4
 pydantic
+pydantic-settings>=2.0.0
 requests
 python-jose==3.3.0
 python-dotenv==0.21.0

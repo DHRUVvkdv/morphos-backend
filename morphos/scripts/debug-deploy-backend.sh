@@ -39,7 +39,7 @@ fi
 # Deploy the service with the verified image
 echo "Deploying Morphos Backend Service..."
 gcloud run deploy morphos-backend-service \
-  --image $IMAGE_TAG \
+  --image gcr.io/boxwood-veld-455217-p6/morphos-backend-service \
   --platform managed \
   --allow-unauthenticated \
   --port 8080 \
@@ -52,7 +52,7 @@ gcloud run deploy morphos-backend-service \
   --region us-central1 \
   --execution-environment gen2 \
   --session-affinity \
-  --set-env-vars="INFERENCE_SERVICE_URL=https://morphos-inference-service-s4uldl3cvq-uc.a.run.app,DEBUG=true" \
-  --cpu-throttling
+  --set-secrets="AUTH0_DOMAIN=AUTH0_DOMAIN:latest,AUTH0_CLIENT_ID=AUTH0_CLIENT_ID:latest,AUTH0_CLIENT_SECRET=AUTH0_CLIENT_SECRET:latest,AUTH0_AUDIENCE=AUTH0_AUDIENCE:latest,MONGODB_URI=MONGODB_URI:latest" \
+  --set-env-vars="INFERENCE_SERVICE_URL=https://morphos-inference-service-s4uldl3cvq-uc.a.run.app,DEBUG=true"
 
 echo "Deployment completed. Checking logs..."

@@ -1,4 +1,4 @@
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 from typing import Optional, List
 import os
 import logging
@@ -6,11 +6,11 @@ import logging
 logger = logging.getLogger("morphos-auth")
 
 # Debug log to see what environment variables are available
-logger.info(f"Environment variables for Auth0:")
-logger.info(f"AUTH0_DOMAIN: {os.environ.get('AUTH0_DOMAIN', 'Not set')}")
-logger.info(f"AUTH0_CLIENT_ID: {os.environ.get('AUTH0_CLIENT_ID', 'Not set')}")
-logger.info(f"AUTH0_CLIENT_SECRET: {os.environ.get('AUTH0_CLIENT_SECRET', 'Not set')}")
-logger.info(f"AUTH0_AUDIENCE: {os.environ.get('AUTH0_AUDIENCE', 'Not set')}")
+# logger.info(f"Environment variables for Auth0:")
+# logger.info(f"AUTH0_DOMAIN: {os.environ.get('AUTH0_DOMAIN', 'Not set')}")
+# logger.info(f"AUTH0_CLIENT_ID: {os.environ.get('AUTH0_CLIENT_ID', 'Not set')}")
+# logger.info(f"AUTH0_CLIENT_SECRET: {os.environ.get('AUTH0_CLIENT_SECRET', 'Not set')}")
+# logger.info(f"AUTH0_AUDIENCE: {os.environ.get('AUTH0_AUDIENCE', 'Not set')}")
 
 
 class Auth0Settings(BaseSettings):
