@@ -39,7 +39,7 @@ gcloud run deploy morphos-inference-service \
   --no-cpu-boost \
   --service-account="1020595365432-compute@developer.gserviceaccount.com" \
   --session-affinity \
-  --use-http2
+  --ingress=all
 
 # Test the service after deployment
 echo "Testing service health..."

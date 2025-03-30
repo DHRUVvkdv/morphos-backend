@@ -751,6 +751,32 @@ async def get_genres():
     return genres
 
 
+@app.websocket("/ws/debug")
+async def websocket_debug(websocket: WebSocket):
+    print("DEBUG: WebSocket connection attempt received")
+    try:
+        await websocket.accept()
+        print("DEBUG: WebSocket connection accepted!")
+
+        # Send a test message
+        await websocket.send_json(
+            {"status": "ok", "message": "WebSocket connection successful"}
+        )
+
+        # Echo back any messages received
+        while True:
+            try:
+                data = await websocket.receive_text()
+                print(f"DEBUG: Received: {data}")
+                await websocket.send_text(f"Echo: {data}")
+            except Exception as e:
+                print(f"DEBUG: Error during message exchange: {str(e)}")
+                break
+
+    except Exception as e:
+        print(f"DEBUG: Error accepting WebSocket connection: {str(e)}")
+
+
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     # Create a new detector for this client if it doesn't exist
@@ -926,4 +952,4 @@ if __name__ == "__main__":
     print(
         f"Spotify API integration: {'Available' if spotify_service.sp is not None else 'Not available - check your credentials'}"
     )
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True, http="h2")
+    uvicorn.run("app:app", host="0.0.0.0", port=port, ws="websockets", log_level="info")
