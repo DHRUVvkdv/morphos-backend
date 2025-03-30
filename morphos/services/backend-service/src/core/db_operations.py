@@ -441,3 +441,294 @@ async def delete_user_by_email(email: str) -> bool:
     except PyMongoError as e:
         logger.error(f"Error deleting user by email: {str(e)}")
         return False
+
+
+# Exercise Collection Operations
+async def create_exercise(exercise_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Create a new exercise session in the database
+    Args:
+        exercise_data: Exercise session data including user_email, exercises performed, etc.
+    Returns:
+        The created exercise document or None if error
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database connection not available")
+        return None
+
+    # Ensure required fields
+    if not exercise_data.get("user_email"):
+        logger.error("Missing required field 'user_email' for exercise creation")
+        return None
+
+    # Add a UUID if not provided
+    if not exercise_data.get("id"):
+        exercise_data["id"] = str(uuid.uuid4())
+
+    # Add timestamps
+    now = datetime.utcnow()
+    exercise_data["created_at"] = now
+
+    try:
+        result = db.exercises.insert_one(exercise_data)
+        if result.inserted_id:
+            # Fetch the inserted document
+            return db.exercises.find_one({"_id": result.inserted_id})
+        return None
+    except PyMongoError as e:
+        logger.error(f"Error creating exercise: {str(e)}")
+        return None
+
+
+async def get_exercise_by_id(exercise_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get exercise by ID
+    Args:
+        exercise_id: Exercise session ID
+    Returns:
+        Exercise document or None if not found
+    """
+    db = get_db()
+    if db is None:
+        return None
+    try:
+        return db.exercises.find_one({"id": exercise_id})
+    except PyMongoError as e:
+        logger.error(f"Error fetching exercise by id: {str(e)}")
+        return None
+
+
+async def get_exercises_by_user_email(
+    email: str, limit: int = 20, skip: int = 0
+) -> List[Dict[str, Any]]:
+    """
+    Get exercises by user email with pagination
+    Args:
+        email: User email
+        limit: Maximum number of exercises to return
+        skip: Number of exercises to skip (for pagination)
+    Returns:
+        List of exercise documents
+    """
+    db = get_db()
+    if db is None:
+        return []
+    try:
+        cursor = (
+            db.exercises.find({"user_email": email})
+            .sort("date", -1)
+            .skip(skip)
+            .limit(limit)
+        )
+        return [exercise for exercise in cursor]
+    except PyMongoError as e:
+        logger.error(f"Error fetching exercises by email: {str(e)}")
+        return []
+
+
+async def update_exercise(
+    exercise_id: str, update_data: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """
+    Update exercise session
+    Args:
+        exercise_id: Exercise session ID
+        update_data: Data to update
+    Returns:
+        Updated exercise document or None if error
+    """
+    db = get_db()
+    if db is None:
+        return None
+
+    try:
+        # Find and update in one operation, returning the updated document
+        updated_exercise = db.exercises.find_one_and_update(
+            {"id": exercise_id},
+            {"$set": update_data},
+            return_document=ReturnDocument.AFTER,
+        )
+        return updated_exercise
+    except PyMongoError as e:
+        logger.error(f"Error updating exercise: {str(e)}")
+        return None
+
+
+async def delete_exercise(exercise_id: str) -> bool:
+    """
+    Delete an exercise session
+    Args:
+        exercise_id: Exercise session ID
+    Returns:
+        True if deleted successfully, False otherwise
+    """
+    db = get_db()
+    if db is None:
+        return False
+    try:
+        result = db.exercises.delete_one({"id": exercise_id})
+        return result.deleted_count > 0
+    except PyMongoError as e:
+        logger.error(f"Error deleting exercise: {str(e)}")
+        return False
+
+
+async def get_user_exercise_stats(email: str) -> Dict[str, Any]:
+    """
+    Get exercise statistics for a user
+    Args:
+        email: User email
+    Returns:
+        Dictionary with exercise statistics
+    """
+    db = get_db()
+    if db is None:
+        return {
+            "total_exercises": 0,
+            "total_duration_minutes": 0,
+            "average_duration_minutes": 0,
+            "exercises_performed": {},
+        }
+
+    try:
+        # Count total exercises - fixed to not use await
+        total_exercises = db.exercises.count_documents({"user_email": email})
+
+        # If no exercises, return empty stats
+        if total_exercises == 0:
+            return {
+                "total_exercises": 0,
+                "total_duration_minutes": 0,
+                "average_duration_minutes": 0,
+                "exercises_performed": {},
+            }
+
+        # Aggregate exercise stats
+        pipeline = [
+            {"$match": {"user_email": email}},
+            {
+                "$group": {
+                    "_id": None,
+                    "total_duration": {"$sum": "$duration_minutes"},
+                    "avg_duration": {"$avg": "$duration_minutes"},
+                    "tpose_count": {
+                        "$sum": {"$cond": [{"$eq": ["$tpose_performed", True]}, 1, 0]}
+                    },
+                    "bicep_curl_count": {
+                        "$sum": {
+                            "$cond": [{"$eq": ["$bicep_curl_performed", True]}, 1, 0]
+                        }
+                    },
+                    "squat_count": {
+                        "$sum": {"$cond": [{"$eq": ["$squat_performed", True]}, 1, 0]}
+                    },
+                    "lateral_raise_count": {
+                        "$sum": {
+                            "$cond": [{"$eq": ["$lateral_raise_performed", True]}, 1, 0]
+                        }
+                    },
+                    "plank_count": {
+                        "$sum": {"$cond": [{"$eq": ["$plank_performed", True]}, 1, 0]}
+                    },
+                    "avg_tpose_score": {
+                        "$avg": {
+                            "$cond": [
+                                {"$eq": ["$tpose_performed", True]},
+                                "$tpose_form_score",
+                                None,
+                            ]
+                        }
+                    },
+                    "avg_bicep_curl_score": {
+                        "$avg": {
+                            "$cond": [
+                                {"$eq": ["$bicep_curl_performed", True]},
+                                "$bicep_curl_form_score",
+                                None,
+                            ]
+                        }
+                    },
+                    "avg_squat_score": {
+                        "$avg": {
+                            "$cond": [
+                                {"$eq": ["$squat_performed", True]},
+                                "$squat_form_score",
+                                None,
+                            ]
+                        }
+                    },
+                    "avg_lateral_raise_score": {
+                        "$avg": {
+                            "$cond": [
+                                {"$eq": ["$lateral_raise_performed", True]},
+                                "$lateral_raise_form_score",
+                                None,
+                            ]
+                        }
+                    },
+                    "avg_plank_score": {
+                        "$avg": {
+                            "$cond": [
+                                {"$eq": ["$plank_performed", True]},
+                                "$plank_form_score",
+                                None,
+                            ]
+                        }
+                    },
+                }
+            },
+        ]
+
+        # Fixed to not use await with to_list
+        result = list(db.exercises.aggregate(pipeline))
+
+        if not result:
+            return {
+                "total_exercises": total_exercises,
+                "total_duration_minutes": 0,
+                "average_duration_minutes": 0,
+                "exercises_performed": {},
+            }
+
+        stats = result[0]
+
+        return {
+            "total_exercises": total_exercises,
+            "total_duration_minutes": stats.get("total_duration", 0),
+            "average_duration_minutes": round(stats.get("avg_duration", 0), 1),
+            "exercises_performed": {
+                "tpose": {
+                    "count": stats.get("tpose_count", 0),
+                    "avg_form_score": round(stats.get("avg_tpose_score", 0) or 0, 2),
+                },
+                "bicep_curl": {
+                    "count": stats.get("bicep_curl_count", 0),
+                    "avg_form_score": round(
+                        stats.get("avg_bicep_curl_score", 0) or 0, 2
+                    ),
+                },
+                "squat": {
+                    "count": stats.get("squat_count", 0),
+                    "avg_form_score": round(stats.get("avg_squat_score", 0) or 0, 2),
+                },
+                "lateral_raise": {
+                    "count": stats.get("lateral_raise_count", 0),
+                    "avg_form_score": round(
+                        stats.get("avg_lateral_raise_score", 0) or 0, 2
+                    ),
+                },
+                "plank": {
+                    "count": stats.get("plank_count", 0),
+                    "avg_form_score": round(stats.get("avg_plank_score", 0) or 0, 2),
+                },
+            },
+        }
+    except PyMongoError as e:
+        logger.error(f"Error getting exercise stats: {str(e)}")
+        return {
+            "total_exercises": 0,
+            "total_duration_minutes": 0,
+            "average_duration_minutes": 0,
+            "exercises_performed": {},
+        }

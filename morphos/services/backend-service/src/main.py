@@ -19,6 +19,7 @@ import sys
 import traceback
 from core.api_key import verify_api_key
 
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -35,6 +36,7 @@ from api.auth_routes import router as auth_router
 from api.routes import router as main_router
 from api.profile_routes import router as profile_router
 from core.database import init_db
+from api.exercise_routes import router as exercise_router
 from core.managers import ConnectionManager
 
 # Get absolute path to current directory
@@ -126,6 +128,8 @@ if db is not None:
     try:
         db.users.create_index("email", unique=True)
         db.users.create_index("auth0_id", unique=True)
+        db.exercises.create_index("user_email")
+        db.exercises.create_index("id", unique=True)
         logger.info("Database indexes created successfully")
     except Exception as e:
         logger.error(f"Error creating database indexes: {str(e)}")
@@ -184,7 +188,9 @@ app.add_middleware(
 # Include routers
 app.include_router(auth_router)
 app.include_router(main_router)
-app.include_router(profile_router)  # Add profile routes
+app.include_router(profile_router)
+app.include_router(exercise_router)
+
 
 # Initialize connection manager
 manager = ConnectionManager()

@@ -76,3 +76,95 @@ The `users` collection stores all user information, including authentication det
   "updated_at": ISODate("2023-03-20T15:30:00Z")
 }
 ```
+
+# MongoDB Exercises Schema
+
+This document outlines the MongoDB schema for storing exercise sessions with performance data.
+
+## Exercises Collection
+
+The `exercises` collection stores all workout session information, including exercise data and performance metrics.
+
+### Fields
+
+#### Session Identification
+
+- `_id`: ObjectId (MongoDB generated ID)
+- `id`: String (UUID, unique identifier for the exercise session)
+- `user_email`: String (Email of the user who performed the workout)
+
+#### Session Timing
+
+- `date`: Date (Date the workout was completed)
+- `start_time`: DateTime (When the workout started)
+- `end_time`: DateTime (When the workout ended)
+- `duration_minutes`: Integer (Total duration in minutes)
+
+#### T-Pose Exercise
+
+- `tpose_performed`: Boolean (Whether this exercise was performed)
+- `tpose_hold_time_seconds`: Integer (Hold time for T-Pose)
+- `tpose_form_score`: Float (Form score for T-Pose, between 0 and 1)
+
+#### Bicep Curl Exercise
+
+- `bicep_curl_performed`: Boolean (Whether this exercise was performed)
+- `bicep_curl_reps`: Integer (Reps for Bicep Curl)
+- `bicep_curl_form_score`: Float (Form score for Bicep Curl, between 0 and 1)
+
+#### Squat Exercise
+
+- `squat_performed`: Boolean (Whether this exercise was performed)
+- `squat_reps`: Integer (Reps for Squat)
+- `squat_form_score`: Float (Form score for Squat, between 0 and 1)
+
+#### Lateral Raise Exercise
+
+- `lateral_raise_performed`: Boolean (Whether this exercise was performed)
+- `lateral_raise_reps`: Integer (Reps for Lateral Raise)
+- `lateral_raise_form_score`: Float (Form score for Lateral Raise, between 0 and 1)
+
+#### Plank Exercise
+
+- `plank_performed`: Boolean (Whether this exercise was performed)
+- `plank_hold_time_seconds`: Integer (Hold time for Plank)
+- `plank_form_score`: Float (Form score for Plank, between 0 and 1)
+
+#### System Fields
+
+- `created_at`: DateTime (Record creation timestamp)
+
+### Indexes
+
+- `user_email`: Index for efficient lookup by user
+- `id`: Unique index for efficient lookup by exercise ID
+
+## Example Document
+
+```json
+{
+  "_id": ObjectId("507f1f77bcf86cd799439011"),
+  "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "user_email": "user@example.com",
+  "date": ISODate("2023-03-15T00:00:00Z"),
+  "start_time": ISODate("2023-03-15T12:00:00Z"),
+  "end_time": ISODate("2023-03-15T12:45:00Z"),
+  "duration_minutes": 45,
+  "tpose_performed": true,
+  "tpose_hold_time_seconds": 30,
+  "tpose_form_score": 0.92,
+  "bicep_curl_performed": true,
+  "bicep_curl_reps": 12,
+  "bicep_curl_form_score": 0.85,
+  "squat_performed": true,
+  "squat_reps": 15,
+  "squat_form_score": 0.78,
+  "lateral_raise_performed": false,
+  "lateral_raise_reps": null,
+  "lateral_raise_form_score": null,
+  "plank_performed": true,
+  "plank_hold_time_seconds": 60,
+  "plank_form_score": 0.88,
+  "created_at": ISODate("2023-03-15T12:45:30Z")
+}
+```
