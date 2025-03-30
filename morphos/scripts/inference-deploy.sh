@@ -18,7 +18,7 @@ gcloud secrets add-iam-policy-binding nvidia-driver-capabilities \
     --member="serviceAccount:$SERVICE_ACCOUNT" \
     --role="roles/secretmanager.secretAccessor"
 
-# Deploy Inference Service with increased startup timeout
+# Deploy Inference Service with WebSocket support and session affinity
 echo "Deploying Morphos Inference Service..."
 gcloud run deploy morphos-inference-service \
   --image gcr.io/boxwood-veld-455217-p6/morphos-inference-service \
@@ -37,7 +37,9 @@ gcloud run deploy morphos-inference-service \
   --set-env-vars="PYTHONUNBUFFERED=1,NVIDIA_VISIBLE_DEVICES=all" \
   --gpu 1 \
   --no-cpu-boost \
-  --service-account="1020595365432-compute@developer.gserviceaccount.com"
+  --service-account="1020595365432-compute@developer.gserviceaccount.com" \
+  --session-affinity \
+  --use-http2
 
 # Test the service after deployment
 echo "Testing service health..."

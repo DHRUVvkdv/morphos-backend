@@ -6,3 +6,9 @@ pydantic>=1.8.2
 onnxruntime>=1.15.0
 mediapipe
 spotipy
+python-dotenv
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=1.8.0+cpu
+torchvision>=0.9.0+cpu
+ultralytics
+websockets>=10.0

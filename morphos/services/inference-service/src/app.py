@@ -41,6 +41,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.on_event("startup")
+async def startup_event():
+    print("Starting server with WebSocket support...")
+    print("Server configured to run with HTTP/2 support")
+
+
 # Initialize services
 emotion_detector = EmotionDetector()
 spotify_service = SpotifyService()
@@ -899,6 +906,18 @@ async def root():
     }
 
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+
+@app.websocket("/ws/test")
+async def websocket_test(websocket: WebSocket):
+    await websocket.accept()
+    await websocket.send_text("WebSocket connection established successfully!")
+    await websocket.close()
+
+
 if __name__ == "__main__":
     import uvicorn
 
@@ -907,4 +926,4 @@ if __name__ == "__main__":
     print(
         f"Spotify API integration: {'Available' if spotify_service.sp is not None else 'Not available - check your credentials'}"
     )
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True, http="h2")
