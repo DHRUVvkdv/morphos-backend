@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Morphos Simple Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        button {
+            padding: 8px 16px;
+            margin-right: 10px;
+        }
+        #results {
+            width: 100%;
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f9f9f9;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>Morphos Simple Test Client</h1>
+    <div class="container">
+        <div>
+            <label for="serverUrl">Server URL:</label>
+            <input type="text" id="serverUrl" value="https://morphos-backend-service-1020595365432.us-central1.run.app" style="width: 400px;">
+        </div>
+        <div>
+            <button id="healthCheckBtn">Health Check</button>
+            <button id="connectWsBtn">Test WebSocket</button>
+            <button id="stopWsBtn" disabled>Disconnect</button>
+        </div>
+        <div>
+            <h3>Results:</h3>
+            <pre id="results">Waiting for tests...</pre>
+        </div>
+    </div>
+    <script>
+        const serverUrlInput = document.getElementById('serverUrl');
+        const healthCheckBtn = document.getElementById('healthCheckBtn');
+        const connectWsBtn = document.getElementById('connectWsBtn');
+        const stopWsBtn = document.getElementById('stopWsBtn');
+        const resultsElement = document.getElementById('results');
+        
+        let socket = null;
+        
+        // Log message to results area
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            resultsElement.innerText = `[${timestamp}] ${message}\n\n` + resultsElement.innerText;
+        }
+        
+        // Test the health endpoint
+        async function testHealthEndpoint() {
+            try {
+                const serverUrl = serverUrlInput.value.trim();
+                const healthUrl = `${serverUrl}/health`;
+                
+                log(`Testing health endpoint: ${healthUrl}`);
+                
+                const response = await fetch(healthUrl);
+                const data = await response.json();
+                
+                log(`Health check response: ${JSON.stringify(data)}`);
+                
+                if (response.ok) {
+                    log(`✅ Health check successful!`);
+                } else {
+                    log(`❌ Health check failed with status: ${response.status}`);
+                }
+            } catch (error) {
+                log(`❌ Health check error: ${error.message}`);
+            }
+        }
+        
+        // Test WebSocket connection
+        function testWebSocketConnection() {
+            try {
+                // Generate a client ID
+                const clientId = 'test-' + Math.floor(Math.random() * 1000);
+                
+                // Build the WebSocket URL
+                let serverUrl = serverUrlInput.value.trim();
+                let wsUrl = `${serverUrl}/ws/${clientId}`;
+                
+                // Convert HTTP to WebSocket protocol
+                if (wsUrl.startsWith('https://')) {
+                    wsUrl = wsUrl.replace('https://', 'wss://');
+                } else if (wsUrl.startsWith('http://')) {
+                    wsUrl = wsUrl.replace('http://', 'ws://');
+                }
+                
+                log(`Connecting to WebSocket: ${wsUrl}`);
+                
+                // Create WebSocket connection
+                socket = new WebSocket(wsUrl);
+                
+                // Connection opened
+                socket.addEventListener('open', (event) => {
+                    log(`✅ WebSocket connection established!`);
+                    connectWsBtn.disabled = true;
+                    stopWsBtn.disabled = false;
+                    
+                    // Send a test message
+                    const testMessage = { type: 'ping', timestamp: Date.now() };
+                    socket.send(JSON.stringify(testMessage));
+                    log(`Sent test message: ${JSON.stringify(testMessage)}`);
+                });
+                
+                // Listen for messages
+                socket.addEventListener('message', (event) => {
+                    log(`Received message: ${event.data}`);
+                });
+                
+                // Connection closed
+                socket.addEventListener('close', (event) => {
+                    log(`WebSocket connection closed. Code: ${event.code}, Reason: ${event.reason}`);
+                    connectWsBtn.disabled = false;
+                    stopWsBtn.disabled = true;
+                    socket = null;
+                });
+                
+                // Connection error
+                socket.addEventListener('error', (event) => {
+                    log(`❌ WebSocket error`);
+                    connectWsBtn.disabled = false;
+                    stopWsBtn.disabled = true;
+                });
+                
+            } catch (error) {
+                log(`❌ Error creating WebSocket connection: ${error.message}`);
+                connectWsBtn.disabled = false;
+                stopWsBtn.disabled = true;
+            }
+        }
+        
+        // Disconnect WebSocket
+        function disconnectWebSocket() {
+            if (socket) {
+                log('Closing WebSocket connection...');
+                socket.close();
+                socket = null;
+                connectWsBtn.disabled = false;
+                stopWsBtn.disabled = true;
+            }
+        }
+        
+        // Event listeners
+        healthCheckBtn.addEventListener('click', testHealthEndpoint);
+        connectWsBtn.addEventListener('click', testWebSocketConnection);
+        stopWsBtn.addEventListener('click', disconnectWebSocket);
+        
+        // Initial log
+        log('Test client ready. Click "Health Check" to test server health or "Test WebSocket" to test WebSocket connection.');
+    </script>
+</body>
+</html>

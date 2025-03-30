@@ -1,4 +1,11 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from fastapi import (
+    APIRouter,
+    WebSocket,
+    WebSocketDisconnect,
+    Depends,
+    HTTPException,
+    Request,
+)
 import logging
 import json
 import base64
@@ -25,6 +32,37 @@ settings = Settings()
 
 # Initialize session storage for tracking client state
 session_data = {}
+
+
+# Add this helper function for CORS
+async def cors_validation(websocket: WebSocket):
+    """Validate CORS request and handle preflight."""
+    request = websocket.scope.get("request", {"headers": {}})
+    origin = next(
+        (
+            value.decode()
+            for name, value in websocket.scope.get("headers", [])
+            if name.decode().lower() == "origin"
+        ),
+        None,
+    )
+
+    logger.info(f"WebSocket connection attempt from origin: {origin}")
+
+    # Always accept connections in development mode
+    if settings.DEBUG:
+        logger.info("DEBUG mode - accepting all WebSocket connections")
+        return True
+
+    # Check if origin is allowed
+    if origin and (origin in settings.CORS_ORIGINS or "*" in settings.CORS_ORIGINS):
+        logger.info(f"Origin {origin} is allowed")
+        return True
+
+    logger.warning(
+        f"Origin {origin} is not allowed. CORS_ORIGINS: {settings.CORS_ORIGINS}"
+    )
+    return False
 
 
 async def call_inference_service(frame_data: str) -> Dict[str, Any]:
@@ -145,7 +183,19 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         websocket: The WebSocket connection
         client_id: Client identifier
     """
+    # Log connection attempt
+    logger.info(f"WebSocket connection attempt from client: {client_id}")
+
+    # Check CORS before accepting connection
+    if not await cors_validation(websocket):
+        logger.warning(f"CORS validation failed for client: {client_id}")
+        return
+
     # Accept the connection
+    await websocket.accept()
+    logger.info(f"WebSocket connection accepted for client: {client_id}")
+
+    # Register the connection with the manager
     await manager.connect(websocket, client_id)
 
     # Set up a heartbeat task
@@ -161,6 +211,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         }
 
     try:
+        # Send a welcome message to confirm connection
+        await websocket.send_json(
+            {"status": "connected", "message": "Connection established"}
+        )
+
         while True:
             # Receive frame from client
             data = await websocket.receive_text()

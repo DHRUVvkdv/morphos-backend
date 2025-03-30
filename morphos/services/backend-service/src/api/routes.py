@@ -8,7 +8,7 @@ router = APIRouter()
 async def root() -> Dict[str, Any]:
     """Root endpoint"""
     return {
-        "service": "Morphos WebSocket Service",
+        "service": "Morphos Backend Service",
         "status": "running",
         "version": "0.1.0",
     }

@@ -60,14 +60,13 @@
             <button id="startButton">Start</button>
             <button id="stopButton" disabled>Stop</button>
             <label for="analysisUrl">Backend URL:</label>
-            <input type="text" id="analysisUrl" value="http://localhost:8080/ws/" style="width: 250px;">
+            <input type="text" id="analysisUrl" value="https://morphos-backend-service-1020595365432.us-central1.run.app/ws/" style="width: 400px;">
         </div>
         <div>
             <h3>Results:</h3>
             <pre id="results">Waiting for analysis...</pre>
         </div>
     </div>
-
     <script>
         const video = document.getElementById('videoElement');
         const canvas = document.getElementById('canvasElement');
@@ -111,14 +110,22 @@
             }
         }
         
-        // Connect to WebSocket server
+        // Connect to WebSocket server with proper protocol
         function connectWebSocket() {
             // Generate a random client ID
             const clientId = 'client_' + Math.random().toString(36).substring(2, 15);
-            const wsUrl = analysisUrl.value + clientId;
+            
+            // Convert http/https to ws/wss
+            let wsUrl = analysisUrl.value + clientId;
+            if (wsUrl.startsWith('https://')) {
+                wsUrl = wsUrl.replace('https://', 'wss://');
+            } else if (wsUrl.startsWith('http://')) {
+                wsUrl = wsUrl.replace('http://', 'ws://');
+            }
             
             log(`Connecting to WebSocket: ${wsUrl}`);
             
+            // Create WebSocket with explicit options
             socket = new WebSocket(wsUrl);
             
             socket.onopen = function() {
@@ -256,9 +263,32 @@
             stopStreaming();
         });
         
-        // Initialize camera on page load
+        // Check if server is running
+        async function checkServer() {
+            try {
+                // Convert WebSocket URL to HTTP URL for health check
+                let healthUrl = analysisUrl.value.replace('/ws/', '/health');
+                if (healthUrl.startsWith('wss://')) {
+                    healthUrl = healthUrl.replace('wss://', 'https://');
+                } else if (healthUrl.startsWith('ws://')) {
+                    healthUrl = healthUrl.replace('ws://', 'http://');
+                }
+                
+                const response = await fetch(healthUrl);
+                if (response.ok) {
+                    log(`Server is running: ${healthUrl}`);
+                } else {
+                    log(`Server health check failed: ${response.status}`);
+                }
+            } catch (err) {
+                log(`Cannot reach server: ${err.message}`);
+            }
+        }
+        
+        // Initialize camera and check server on page load
         initCamera().then(() => {
             log("Camera initialized. Click 'Start' to begin analysis.");
+            checkServer();
         });
     </script>
 </body>
