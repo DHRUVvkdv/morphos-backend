@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Morphos WebSocket Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #messages { border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: auto; margin-bottom: 10px; }
+        #input { width: 80%; padding: 5px; }
+        button { padding: 5px 10px; }
+        .status {
+            padding: 5px 10px;
+            border-radius: 5px;
+            display: inline-block;
+            margin-bottom: 10px;
+        }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .connecting { background-color: #fff3cd; color: #856404; }
+    </style>
+</head>
+<body>
+    <h1>Morphos WebSocket Test</h1>
+    <div id="connectionStatus" class="status disconnected">Disconnected</div>
+    <div>
+        <span>Connection uptime: </span><span id="uptime">0s</span>
+    </div>
+    <div id="messages"></div>
+    <input type="text" id="input" placeholder="Type a message...">
+    <button onclick="sendMessage()">Send</button>
+    <button onclick="reconnect()">Reconnect</button>
+    
+    <script>
+        // Generate a random client ID
+        const clientId = 'test-' + Math.floor(Math.random() * 1000);
+        const wsUrl = `wss://morphos-backend-service-1020595365432.us-central1.run.app/ws/${clientId}`;
+        let socket;
+        let connectionStartTime = null;
+        let uptimeInterval = null;
+        let pingInterval = null;
+        let lastPingTime = null;
+        
+        // Update the connection status display
+        function updateStatus(status) {
+            const statusDiv = document.getElementById('connectionStatus');
+            statusDiv.className = 'status ' + status.toLowerCase();
+            statusDiv.textContent = status;
+            
+            if (status === 'Connected') {
+                connectionStartTime = new Date();
+                startUptimeCounter();
+                startPingInterval();
+            } else {
+                stopUptimeCounter();
+                stopPingInterval();
+            }
+        }
+        
+        // Start the uptime counter
+        function startUptimeCounter() {
+            stopUptimeCounter(); // Stop any existing counter
+            uptimeInterval = setInterval(updateUptime, 1000);
+        }
+        
+        // Stop the uptime counter
+        function stopUptimeCounter() {
+            if (uptimeInterval) {
+                clearInterval(uptimeInterval);
+                uptimeInterval = null;
+            }
+        }
+        
+        // Update the uptime display
+        function updateUptime() {
+            if (!connectionStartTime) return;
+            
+            const now = new Date();
+            const diff = now - connectionStartTime;
+            const seconds = Math.floor(diff / 1000);
+            const minutes = Math.floor(seconds / 60);
+            const hours = Math.floor(minutes / 60);
+            
+            let uptimeText = '';
+            if (hours > 0) {
+                uptimeText += hours + 'h ';
+            }
+            if (minutes > 0 || hours > 0) {
+                uptimeText += (minutes % 60) + 'm ';
+            }
+            uptimeText += (seconds % 60) + 's';
+            
+            document.getElementById('uptime').textContent = uptimeText;
+        }
+        
+        // Start ping interval to keep connection alive
+        function startPingInterval() {
+            stopPingInterval(); // Stop any existing interval
+            pingInterval = setInterval(sendPing, 15000); // Send ping every 15 seconds
+        }
+        
+        // Stop ping interval
+        function stopPingInterval() {
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+        }
+        
+        // Send a ping message
+        function sendPing() {
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                lastPingTime = Date.now();
+                socket.send(JSON.stringify({ type: 'ping', timestamp: lastPingTime }));
+                appendMessage('Client', 'Sent ping');
+            }
+        }
+        
+        // Connect to WebSocket
+        function connect() {
+            updateStatus('Connecting');
+            appendMessage('System', 'Connecting...');
+            
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = function(e) {
+                updateStatus('Connected');
+                appendMessage('System', 'Connected!');
+                
+                // Send initial ping
+                setTimeout(sendPing, 1000);
+            };
+            
+            socket.onmessage = function(event) {
+                let messageText = event.data;
+                
+                // Try to parse as JSON
+                try {
+                    const jsonData = JSON.parse(event.data);
+                    
+                    // Handle heartbeat/ping/pong messages differently
+                    if (jsonData.type === 'heartbeat') {
+                        appendMessage('Server', 'Heartbeat received', true);
+                        return;
+                    } else if (jsonData.type === 'ping') {
+                        appendMessage('Server', 'Ping received', true);
+                        // Respond with pong
+                        socket.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+                        return;
+                    } else if (jsonData.type === 'pong') {
+                        const roundTripTime = lastPingTime ? Date.now() - lastPingTime : 'unknown';
+                        appendMessage('Server', `Pong received (${roundTripTime}ms)`, true);
+                        return;
+                    }
+                    
+                    // Format JSON nicely
+                    messageText = JSON.stringify(jsonData, null, 2);
+                } catch (e) {
+                    // Not JSON, use as is
+                }
+                
+                appendMessage('Server', messageText);
+            };
+            
+            socket.onclose = function(event) {
+                updateStatus('Disconnected');
+                appendMessage('System', `Connection closed. Code: ${event.code}, Reason: ${event.reason || 'No reason provided'}`);
+                
+                // Don't auto-reconnect
+            };
+            
+            socket.onerror = function(error) {
+                updateStatus('Disconnected');
+                appendMessage('System', 'WebSocket Error');
+            };
+        }
+        
+        // Manually reconnect
+        function reconnect() {
+            if (socket) {
+                socket.close();
+            }
+            connect();
+        }
+        
+        // Send a message
+        function sendMessage() {
+            const input = document.getElementById('input');
+            const message = input.value;
+            
+            if (message && socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(message);
+                appendMessage('You', message);
+                input.value = '';
+            } else {
+                appendMessage('System', 'Cannot send message: Not connected');
+            }
+        }
+        
+        // Append a message to the messages div
+        function appendMessage(sender, message, isSystemMessage = false) {
+            const messagesDiv = document.getElementById('messages');
+            const messageElement = document.createElement('div');
+            
+            if (isSystemMessage) {
+                // For system messages like heartbeats, make them less prominent
+                messageElement.style.color = '#888';
+                messageElement.style.fontSize = '0.8em';
+            }
+            
+            messageElement.innerHTML = `<strong>${sender}:</strong> ${message}`;
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        // Listen for Enter key
+        document.getElementById('input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Connect when the page loads
+        window.onload = connect;
+    </script>
+</body>
+</html>

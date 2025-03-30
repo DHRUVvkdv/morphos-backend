@@ -15,8 +15,8 @@ class ConnectionManager:
         self.last_activity: Dict[str, float] = {}
 
     async def connect(self, websocket: WebSocket, client_id: str):
-        """Accept a new WebSocket connection"""
-        await websocket.accept()
+        """Register a new WebSocket connection"""
+        # REMOVED the websocket.accept() call here - FastAPI handles this automatically
         self.active_connections[client_id] = websocket
         self.last_activity[client_id] = time.time()
         logger.info(

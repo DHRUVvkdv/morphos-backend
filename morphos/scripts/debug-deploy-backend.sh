@@ -5,19 +5,41 @@ set -e
 SCRIPT_DIR="$(dirname "$0")"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Clean up old image first
-echo "Cleaning up old backend image..."
-gcloud container images delete gcr.io/boxwood-veld-455217-p6/morphos-backend-service --quiet || true
+# Generate a timestamp for consistent image tagging
+TIMESTAMP=$(date +%s)
+IMAGE_TAG="gcr.io/boxwood-veld-455217-p6/morphos-backend-service:$TIMESTAMP"
 
-# Build with specific tag to avoid caching issues
+echo "Building and deploying backend with tag: $IMAGE_TAG"
+
+# Build with specific tag
 echo "Building Morphos Backend service..."
 cd "$PROJECT_ROOT/services/backend-service"
-gcloud builds submit --tag gcr.io/boxwood-veld-455217-p6/morphos-backend-service:$(date +%s) .
+gcloud builds submit --tag $IMAGE_TAG .
 
-# Deploy the service
+# Verify the image exists before deploying
+echo "Verifying image exists in registry..."
+max_retries=10
+count=0
+while [ $count -lt $max_retries ]; do
+  if gcloud container images describe $IMAGE_TAG >/dev/null 2>&1; then
+    echo "Image found in registry. Proceeding with deployment."
+    break
+  else
+    echo "Waiting for image to be available in registry... (Attempt $((count+1))/$max_retries)"
+    sleep 10
+    count=$((count+1))
+  fi
+done
+
+if [ $count -eq $max_retries ]; then
+  echo "Error: Image not found in registry after $max_retries attempts. Aborting deployment."
+  exit 1
+fi
+
+# Deploy the service with the verified image
 echo "Deploying Morphos Backend Service..."
 gcloud run deploy morphos-backend-service \
-  --image gcr.io/boxwood-veld-455217-p6/morphos-backend-service:$(date +%s) \
+  --image $IMAGE_TAG \
   --platform managed \
   --allow-unauthenticated \
   --port 8080 \
@@ -34,4 +56,3 @@ gcloud run deploy morphos-backend-service \
   --cpu-throttling
 
 echo "Deployment completed. Checking logs..."
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=morphos-backend-service" --limit=20

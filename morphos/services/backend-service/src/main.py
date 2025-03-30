@@ -63,11 +63,11 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     await websocket.accept()
     logger.info(f"WebSocket connection accepted for client: {client_id}")
 
-    # Register with manager
+    # Register with manager - don't call accept again
     await manager.connect(websocket, client_id)
 
     # Start heartbeat task in the background
-    heartbeat_task = asyncio.create_task(manager.heartbeat(client_id))
+    heartbeat_task = asyncio.create_task(manager.heartbeat(client_id, interval=15))
 
     try:
         # Send welcome message
