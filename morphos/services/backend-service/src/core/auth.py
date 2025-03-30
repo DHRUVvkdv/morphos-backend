@@ -66,7 +66,7 @@ async def get_auth0_public_keys():
     if not auth0_domain.startswith("http"):
         auth0_domain = f"https://{auth0_domain}"
 
-    logger.info(f"Using Auth0 domain for JWKS: {auth0_domain}")
+    # logger.info(f"Using Auth0 domain for JWKS: {auth0_domain}")
 
     # Fetch keys from Auth0
     jwks_url = f"{auth0_domain}/.well-known/jwks.json"
@@ -157,12 +157,12 @@ async def create_auth0_user(email: str, password: str, name: Optional[str] = Non
         if not auth0_domain.startswith("http"):
             auth0_domain = f"https://{auth0_domain}"
 
-        logger.info(f"Using Auth0 domain: {auth0_domain}")
+        # logger.info(f"Using Auth0 domain: {auth0_domain}")
 
         # Step 1: Get Management API token
         async with httpx.AsyncClient() as client:
             token_url = f"{auth0_domain}/oauth/token"
-            logger.info(f"Token URL: {token_url}")
+            # logger.info(f"Token URL: {token_url}")
 
             token_response = await client.post(
                 token_url,
@@ -247,10 +247,10 @@ async def custom_signin(email: str, password: str) -> dict:
             if not auth0_domain.startswith("http"):
                 auth0_domain = f"https://{auth0_domain}"
 
-            logger.info(f"Using Auth0 domain: {auth0_domain}")
+            # logger.info(f"Using Auth0 domain: {auth0_domain}")
 
             token_url = f"{auth0_domain}/oauth/token"
-            logger.info(f"Token URL: {token_url}")
+            # logger.info(f"Token URL: {token_url}")
 
             token_response = await client.post(
                 token_url,
@@ -453,10 +453,10 @@ async def get_management_token() -> str:
         if not auth0_domain.startswith("http"):
             auth0_domain = f"https://{auth0_domain}"
 
-        logger.info(f"Using Auth0 domain: {auth0_domain}")
+        # logger.info(f"Using Auth0 domain: {auth0_domain}")
 
         token_url = f"{auth0_domain}/oauth/token"
-        logger.info(f"Token URL: {token_url}")
+        # logger.info(f"Token URL: {token_url}")
 
         async with httpx.AsyncClient() as client:
             response = await client.post(

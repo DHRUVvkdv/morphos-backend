@@ -82,8 +82,8 @@ async def verify_api_key(request: Request) -> None:
     )
 
     # Log API key details with maximum verbosity
-    logger.info(f"Effective API_KEY from environment: {api_key}")
-    logger.info(f"Received API key header: {api_key_header}")
+    # logger.info(f"Effective API_KEY from environment: {api_key}")
+    # logger.info(f"Received API key header: {api_key_header}")
 
     if not api_key_header:
         logger.warning(f"Missing API key for request to {request.url.path}")
