@@ -288,10 +288,17 @@ async def upload_inference(file: UploadFile = File(...)):
     return await run_inference(request)
 
 
+# In your main.py file, make sure you have code like this at the bottom:
 if __name__ == "__main__":
     import uvicorn
+    import os
 
     # Get port from environment variable
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 8080))
 
-    uvicorn.run("main:app", host="0.0.0.0", port=port, log_level="info")
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        log_level="info",
+    )
