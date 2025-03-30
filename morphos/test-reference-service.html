@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Morphos Inference Service Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .video-container {
+            position: relative;
+        }
+        #videoElement {
+            width: 640px;
+            height: 480px;
+            background-color: #ddd;
+            border: 1px solid #999;
+        }
+        #canvasElement {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 640px;
+            height: 480px;
+            pointer-events: none;
+        }
+        #controls {
+            margin-top: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            margin-right: 10px;
+        }
+        #results {
+            width: 100%;
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f9f9f9;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>Morphos Inference Service Test</h1>
+    <div class="container">
+        <div class="video-container">
+            <video id="videoElement" autoplay playsinline></video>
+            <canvas id="canvasElement"></canvas>
+        </div>
+        <div id="controls">
+            <button id="startButton">Start Camera</button>
+            <button id="captureButton" disabled>Capture & Test</button>
+            <button id="stopButton" disabled>Stop Camera</button>
+            <div style="margin-top: 10px;">
+                <label for="inferenceUrl">Inference URL:</label>
+                <input type="text" id="inferenceUrl" value="https://morphos-inference-service-s4uldl3cvq-uc.a.run.app/inference" style="width: 400px;">
+            </div>
+        </div>
+        <div>
+            <h3>Results:</h3>
+            <pre id="results">Waiting for test results...</pre>
+        </div>
+    </div>
+    <script>
+        const video = document.getElementById('videoElement');
+        const canvas = document.getElementById('canvasElement');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const captureButton = document.getElementById('captureButton');
+        const stopButton = document.getElementById('stopButton');
+        const inferenceUrl = document.getElementById('inferenceUrl');
+        const resultsElement = document.getElementById('results');
+        
+        let stream = null;
+        
+        // Set canvas dimensions
+        canvas.width = 640;
+        canvas.height = 480;
+        
+        // Initialize webcam
+        async function initCamera() {
+            try {
+                const constraints = {
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        frameRate: { ideal: 30 }
+                    }
+                };
+                
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                video.srcObject = stream;
+                
+                return new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        resolve(true);
+                    };
+                });
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                log("❌ Error accessing camera: " + err.message);
+                return false;
+            }
+        }
+        
+        // Capture frame and test inference
+        async function captureAndTest() {
+            try {
+                // Draw current video frame to canvas
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // Get frame as base64 encoded image
+                const imageData = canvas.toDataURL('image/jpeg', 0.8);
+                
+                log("📸 Captured frame, sending to inference service...");
+                
+                // Send to inference service
+                const response = await fetch(inferenceUrl.value, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        image: imageData
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                
+                log("✅ Received inference result:");
+                log(JSON.stringify(result, null, 2));
+                
+                // Draw bounding boxes
+                drawDetections(result.boxes);
+                
+            } catch (err) {
+                log("❌ Error testing inference: " + err.message);
+                console.error("Error testing inference:", err);
+            }
+        }
+        
+        // Draw bounding boxes on canvas
+        function drawDetections(boxes) {
+            if (!boxes || boxes.length === 0) {
+                log("No objects detected");
+                return;
+            }
+            
+            // Clear previous drawings
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Redraw the video frame
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // Set drawing styles
+            ctx.lineWidth = 3;
+            ctx.font = '16px Arial';
+            ctx.textBaseline = 'top';
+            
+            boxes.forEach(box => {
+                // Generate a color based on class_id
+                const hue = (box.class_id * 137) % 360; // Distribute colors
+                ctx.strokeStyle = `hsl(${hue}, 100%, 40%)`;
+                ctx.fillStyle = `hsl(${hue}, 100%, 40%)`;
+                
+                // Draw bounding box
+                ctx.beginPath();
+                ctx.rect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
+                ctx.stroke();
+                
+                // Draw label background
+                const label = `${box.class_name} ${Math.round(box.confidence * 100)}%`;
+                const textWidth = ctx.measureText(label).width;
+                ctx.fillRect(box.x1, box.y1, textWidth + 10, 20);
+                
+                // Draw label text
+                ctx.fillStyle = 'white';
+                ctx.fillText(label, box.x1 + 5, box.y1);
+            });
+        }
+        
+        // Stop webcam
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                stream = null;
+                
+                // Clear canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                
+                startButton.disabled = false;
+                captureButton.disabled = true;
+                stopButton.disabled = true;
+                
+                log("Camera stopped");
+            }
+        }
+        
+        // Check if server is running
+        async function checkInferenceService() {
+            try {
+                // Convert inference URL to health check URL
+                let healthUrl = inferenceUrl.value.replace('/inference', '/health');
+                
+                log(`Checking inference service health: ${healthUrl}`);
+                
+                const response = await fetch(healthUrl);
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ Inference service health check: ${JSON.stringify(data)}`);
+                } else {
+                    log(`❌ Inference service health check failed: ${response.status}`);
+                }
+            } catch (err) {
+                log(`❌ Cannot reach inference service: ${err.message}`);
+            }
+        }
+        
+        // Log message to results area
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            resultsElement.innerText = `[${timestamp}] ${message}\n\n` + resultsElement.innerText;
+        }
+        
+        // Event listeners
+        startButton.addEventListener('click', async () => {
+            log("Starting camera...");
+            const success = await initCamera();
+            if (success) {
+                log("✅ Camera started successfully");
+                startButton.disabled = true;
+                captureButton.disabled = false;
+                stopButton.disabled = false;
+                
+                // Check if inference service is available
+                checkInferenceService();
+            }
+        });
+        
+        captureButton.addEventListener('click', captureAndTest);
+        
+        stopButton.addEventListener('click', stopCamera);
+        
+        // Initial log
+        log("Test client ready. Click 'Start Camera' to begin testing the inference service.");
+    </script>
+</body>
+</html>

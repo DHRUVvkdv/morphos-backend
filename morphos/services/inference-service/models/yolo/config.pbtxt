@@ -1,6 +1,6 @@
 name: "yolo"
 platform: "onnxruntime_onnx"
-max_batch_size: 8
+max_batch_size: 1
 input [
   {
     name: "images"
@@ -12,6 +12,10 @@ output [
   {
     name: "output0"
     data_type: TYPE_FP32
-    dims: [ -1, 84 ]
+    dims: [ -1, 56 ]  # Updated for pose model (17 keypoints x 3 + 5 detection params)
   }
 ]
+instance_group {
+  count: 1
+  kind: KIND_GPU
+}
