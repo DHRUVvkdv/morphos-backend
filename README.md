@@ -57,3 +57,6 @@ To deploy to Google Cloud:
 ./scripts/deploy.sh
 
 docker compose up --build
+
+docker build -t morphos-inference-service .
+docker run -p 8000:8000 -v "$(pwd)/models:/models" morphos-inference-service
