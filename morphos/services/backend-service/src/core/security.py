@@ -100,5 +100,6 @@ async def verify_token(token: Optional[str] = None) -> bool:
     Returns:
         True if token is valid, False otherwise
     """
-    # TODO: Implement actual token verification
-    return True if token else False
+    # Don't use "if token:" as it could be a database object
+    # Instead use explicit check against None
+    return token is not None

@@ -61,11 +61,19 @@ async def get_auth0_public_keys():
     if JWKS_CACHE["keys"] and JWKS_CACHE["expires_at"] > time.time():
         return JWKS_CACHE["keys"]
 
+    # Ensure the Auth0 domain has the https:// protocol
+    auth0_domain = auth0_settings.DOMAIN
+    if not auth0_domain.startswith("http"):
+        auth0_domain = f"https://{auth0_domain}"
+
+    logger.info(f"Using Auth0 domain for JWKS: {auth0_domain}")
+
     # Fetch keys from Auth0
+    jwks_url = f"{auth0_domain}/.well-known/jwks.json"
+    logger.info(f"JWKS URL: {jwks_url}")
+
     async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"https://{auth0_settings.DOMAIN}/.well-known/jwks.json"
-        )
+        response = await client.get(jwks_url)
         if response.status_code != 200:
             logger.error(f"Failed to get Auth0 public keys: {response.text}")
             raise HTTPException(
@@ -144,15 +152,25 @@ async def create_auth0_user(email: str, password: str, name: Optional[str] = Non
     logger.info(f"Creating user with email: {email}")
 
     try:
+        # Ensure the Auth0 domain has the https:// protocol
+        auth0_domain = auth0_settings.DOMAIN
+        if not auth0_domain.startswith("http"):
+            auth0_domain = f"https://{auth0_domain}"
+
+        logger.info(f"Using Auth0 domain: {auth0_domain}")
+
         # Step 1: Get Management API token
         async with httpx.AsyncClient() as client:
+            token_url = f"{auth0_domain}/oauth/token"
+            logger.info(f"Token URL: {token_url}")
+
             token_response = await client.post(
-                f"https://{auth0_settings.DOMAIN}/oauth/token",
+                token_url,
                 json={
                     "grant_type": "client_credentials",
                     "client_id": auth0_settings.CLIENT_ID,
                     "client_secret": auth0_settings.CLIENT_SECRET,
-                    "audience": f"https://{auth0_settings.DOMAIN}/api/v2/",
+                    "audience": f"{auth0_domain}/api/v2/",
                 },
             )
 
@@ -179,8 +197,11 @@ async def create_auth0_user(email: str, password: str, name: Optional[str] = Non
             if name:
                 user_data["name"] = name
 
+            create_url = f"{auth0_domain}/api/v2/users"
+            logger.info(f"Create URL: {create_url}")
+
             create_response = await client.post(
-                f"https://{auth0_settings.DOMAIN}/api/v2/users",
+                create_url,
                 headers={"Authorization": f"Bearer {mgmt_token}"},
                 json=user_data,
             )
@@ -221,13 +242,23 @@ async def custom_signin(email: str, password: str) -> dict:
     try:
         # Step 1: Get Management API token
         async with httpx.AsyncClient() as client:
+            # Ensure the Auth0 domain has the https:// protocol
+            auth0_domain = auth0_settings.DOMAIN
+            if not auth0_domain.startswith("http"):
+                auth0_domain = f"https://{auth0_domain}"
+
+            logger.info(f"Using Auth0 domain: {auth0_domain}")
+
+            token_url = f"{auth0_domain}/oauth/token"
+            logger.info(f"Token URL: {token_url}")
+
             token_response = await client.post(
-                f"https://{auth0_settings.DOMAIN}/oauth/token",
+                token_url,
                 json={
                     "grant_type": "client_credentials",
                     "client_id": auth0_settings.CLIENT_ID,
                     "client_secret": auth0_settings.CLIENT_SECRET,
-                    "audience": f"https://{auth0_settings.DOMAIN}/api/v2/",
+                    "audience": f"{auth0_domain}/api/v2/",
                 },
             )
 
@@ -242,8 +273,11 @@ async def custom_signin(email: str, password: str) -> dict:
 
             # Step 2: Find the user by email
             encoded_email = email.replace("@", "%40")
+            user_url = f"{auth0_domain}/api/v2/users-by-email?email={encoded_email}"
+            logger.info(f"User URL: {user_url}")
+
             user_response = await client.get(
-                f"https://{auth0_settings.DOMAIN}/api/v2/users-by-email?email={encoded_email}",
+                user_url,
                 headers={"Authorization": f"Bearer {mgmt_token}"},
             )
 
@@ -414,14 +448,24 @@ async def get_management_token() -> str:
     logger.info("Requesting management token from Auth0")
 
     try:
+        # Ensure the Auth0 domain has the https:// protocol
+        auth0_domain = auth0_settings.DOMAIN
+        if not auth0_domain.startswith("http"):
+            auth0_domain = f"https://{auth0_domain}"
+
+        logger.info(f"Using Auth0 domain: {auth0_domain}")
+
+        token_url = f"{auth0_domain}/oauth/token"
+        logger.info(f"Token URL: {token_url}")
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"https://{auth0_settings.DOMAIN}/oauth/token",
-                json={  # Changed from data to json to match your working example
+                token_url,
+                json={
                     "grant_type": "client_credentials",
                     "client_id": auth0_settings.CLIENT_ID,
                     "client_secret": auth0_settings.CLIENT_SECRET,
-                    "audience": f"https://{auth0_settings.DOMAIN}/api/v2/",
+                    "audience": f"{auth0_domain}/api/v2/",
                 },
             )
 
@@ -444,21 +488,37 @@ class JWKClient:
     def __init__(self, domain):
         self.domain = domain
         self.cache = {}
+        logger.info(f"JWKClient initialized with domain: {domain}")
 
     async def get_jwks(self):
         if "jwks" in self.cache and self.cache["exp"] > time.time():
+            logger.debug("Using cached JWKS")
             return self.cache["jwks"]
 
+        # Ensure the domain has the https:// protocol
+        domain = self.domain
+        if not domain.startswith("http"):
+            domain = f"https://{domain}"
+
+        logger.info(f"Using domain for JWKS: {domain}")
+
         async with httpx.AsyncClient() as client:
-            url = f"https://{self.domain}/.well-known/jwks.json"
+            url = f"{domain}/.well-known/jwks.json"
+            logger.info(f"JWKS URL: {url}")
+
             response = await client.get(url)
 
             if response.status_code != 200:
-                raise Exception(f"Failed to fetch JWKS: {response.status_code}")
+                error_msg = (
+                    f"Failed to fetch JWKS: {response.status_code}, {response.text}"
+                )
+                logger.error(error_msg)
+                raise Exception(error_msg)
 
             jwks = response.json()
             self.cache["jwks"] = jwks
             self.cache["exp"] = time.time() + 3600  # Cache for 1 hour
+            logger.info("Successfully fetched and cached JWKS")
 
             return jwks
 
@@ -467,19 +527,25 @@ class JWKClient:
 
         for key in jwks["keys"]:
             if key["kid"] == kid:
+                logger.debug(f"Found signing key with kid: {kid}")
                 return key
 
-        raise Exception(f"Unable to find key with kid {kid}")
+        error_msg = f"Unable to find key with kid {kid}"
+        logger.error(error_msg)
+        raise Exception(error_msg)
 
     async def get_signing_key_from_jwt(self, token):
         # Get the kid from the token header
         try:
             headers = jwt.get_unverified_header(token)
             kid = headers["kid"]
+            logger.debug(f"Extracted kid from token: {kid}")
+
             key = await self.get_signing_key(kid)
 
             # Convert to PEM format
             pem_key = jwk.construct(key)
+            logger.debug("Successfully constructed PEM key")
 
             return pem_key
         except Exception as e:

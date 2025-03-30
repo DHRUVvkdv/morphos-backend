@@ -1,17 +1,13 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import asyncio
 import os
 import json
 from dotenv import load_dotenv
-
-# Import routers
-from api.auth_routes import router as auth_router
-from api.routes import router as main_router
-from api.profile_routes import router as profile_router  # New profile routes
-from core.database import init_db
-from core.managers import ConnectionManager
+import sys
+import traceback
+from core.api_key import verify_api_key
 
 # Configure logging
 logging.basicConfig(
@@ -42,14 +38,66 @@ for env_path in possible_env_paths:
 if not env_loaded:
     logger.warning("No .env file found in any expected location")
 
+# ====== ENVIRONMENT VALIDATION (ADD THIS) ======
+# Validate critical environment variables
+required_vars = [
+    "AUTH0_DOMAIN",
+    "AUTH0_CLIENT_ID",
+    "AUTH0_CLIENT_SECRET",
+    "AUTH0_AUDIENCE",
+]
+
+missing_vars = []
+for var in required_vars:
+    if not os.environ.get(var):
+        missing_vars.append(var)
+
+if missing_vars:
+    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+    logger.error(
+        "Authentication features will not work properly without these variables"
+    )
+else:
+    logger.info("All required Auth0 environment variables are set")
+
+# Check Auth0 domain format
+auth0_domain = os.environ.get("AUTH0_DOMAIN", "")
+if auth0_domain and not auth0_domain.startswith(("http://", "https://")):
+    if auth0_domain.strip():  # Make sure it's not just whitespace
+        logger.info(f"Adding https:// protocol to AUTH0_DOMAIN: {auth0_domain}")
+        os.environ["AUTH0_DOMAIN"] = f"https://{auth0_domain}"
+    else:
+        logger.error("AUTH0_DOMAIN is empty or contains only whitespace")
+
+# Display the final Auth0 configuration (truncated for secrets)
+logger.info("=== Auth0 Configuration ===")
+logger.info(f"AUTH0_DOMAIN: {os.environ.get('AUTH0_DOMAIN', '')}")
+logger.info(f"AUTH0_AUDIENCE: {os.environ.get('AUTH0_AUDIENCE', '')}")
+logger.info(
+    f"AUTH0_CLIENT_ID: {os.environ.get('AUTH0_CLIENT_ID', '')[:5] if os.environ.get('AUTH0_CLIENT_ID') else 'not set'}"
+)
+if os.environ.get("AUTH0_CLIENT_SECRET"):
+    logger.info(
+        f"AUTH0_CLIENT_SECRET: {os.environ.get('AUTH0_CLIENT_SECRET', '')[:5]}... (truncated)"
+    )
+else:
+    logger.info("AUTH0_CLIENT_SECRET: not set")
+# ====== END ENVIRONMENT VALIDATION ======
+
 # Print environment variables for debugging (exclude secrets)
 for key, value in os.environ.items():
     if key.startswith("MONGODB_"):
         logger.info(f"{key}: {'*****' if 'URI' in key else value}")
 
-# Initialize database
+# Import routers and database after environment is set up
+from api.auth_routes import router as auth_router
+from api.routes import router as main_router
+from api.profile_routes import router as profile_router
+from core.database import init_db
+from core.managers import ConnectionManager
+
 db = init_db()
-if db:
+if db is not None:  # Changed from "if db:" to "if db is not None:"
     logger.info("Database connection initialized successfully")
 
     # Ensure indexes for efficient queries
@@ -67,6 +115,9 @@ app = FastAPI(
     title="Morphos API Service",
     description="AI Workout Analysis API and WebSocket Service",
     version="0.1.0",
+    dependencies=[
+        Depends(verify_api_key)
+    ],  # Add API key verification as a global dependency
 )
 
 # Configure CORS
@@ -91,11 +142,11 @@ manager = ConnectionManager()
 @app.get("/health")
 async def health_check():
     # Check database connection
-    db_status = "connected" if db else "disconnected"
+    db_status = "connected" if db is not None else "disconnected"
 
     # Additional health metrics
     mongo_status = "ok"
-    if db:
+    if db is not None:
         try:
             # Ping MongoDB to verify connection
             db.command("ping")
@@ -107,6 +158,9 @@ async def health_check():
         "database": db_status,
         "mongo_status": mongo_status,
         "version": "0.1.0",
+        "auth0_domain": os.environ.get("AUTH0_DOMAIN", "not set"),
+        "api_key_enabled": True,
+        "api_key_value": "****" + os.environ.get("API_KEY")[-4:],
     }
 
 
@@ -126,59 +180,64 @@ async def root():
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     # Accept the connection
-    await websocket.accept()
-    logger.info(f"WebSocket connection accepted for client: {client_id}")
-
-    # Register with manager
-    await manager.connect(websocket, client_id)
-
-    # Start heartbeat task
-    heartbeat_task = asyncio.create_task(manager.heartbeat(client_id, interval=15))
-
     try:
-        # Send welcome message
-        await websocket.send_json(
-            {"status": "connected", "message": "Connection established"}
-        )
+        await websocket.accept()
+        logger.info(f"WebSocket connection accepted for client: {client_id}")
 
-        while True:
-            # Receive data from client
-            data = await websocket.receive_text()
+        # Register with manager
+        await manager.connect(websocket, client_id)
 
-            # Handle JSON messages separately
-            if data.startswith("{"):
-                try:
-                    json_data = json.loads(data)
-                    # Process JSON message (could be control commands)
-                    await websocket.send_json(
-                        {
-                            "status": "ok",
-                            "type": "json_response",
-                            "message": "JSON data received and processed",
-                        }
-                    )
-                    continue
-                except json.JSONDecodeError:
-                    pass  # Not valid JSON, process as regular message
+        # Start heartbeat task
+        heartbeat_task = asyncio.create_task(manager.heartbeat(client_id, interval=15))
 
-            # Echo back for video/binary data
+        try:
+            # Send welcome message
             await websocket.send_json(
-                {
-                    "status": "ok",
-                    "type": "data_received",
-                    "received_data_length": len(data),
-                    "message": "Data received successfully",
-                }
+                {"status": "connected", "message": "Connection established"}
             )
 
-    except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for client {client_id}")
-        manager.disconnect(client_id)
-        heartbeat_task.cancel()
+            while True:
+                # Receive data from client
+                data = await websocket.receive_text()
+
+                # Handle JSON messages separately
+                if data.startswith("{"):
+                    try:
+                        json_data = json.loads(data)
+                        # Process JSON message (could be control commands)
+                        await websocket.send_json(
+                            {
+                                "status": "ok",
+                                "type": "json_response",
+                                "message": "JSON data received and processed",
+                            }
+                        )
+                        continue
+                    except json.JSONDecodeError:
+                        pass  # Not valid JSON, process as regular message
+
+                # Echo back for video/binary data
+                await websocket.send_json(
+                    {
+                        "status": "ok",
+                        "type": "data_received",
+                        "received_data_length": len(data),
+                        "message": "Data received successfully",
+                    }
+                )
+
+        except WebSocketDisconnect:
+            logger.info(f"WebSocket disconnected for client {client_id}")
+            manager.disconnect(client_id)
+            heartbeat_task.cancel()
+        except Exception as e:
+            logger.error(f"Error in WebSocket for client {client_id}: {str(e)}")
+            logger.error(traceback.format_exc())
+            manager.disconnect(client_id)
+            heartbeat_task.cancel()
     except Exception as e:
-        logger.error(f"Error in WebSocket for client {client_id}: {str(e)}")
-        manager.disconnect(client_id)
-        heartbeat_task.cancel()
+        logger.error(f"Error in websocket_endpoint for client {client_id}: {str(e)}")
+        logger.error(traceback.format_exc())
 
 
 if __name__ == "__main__":

@@ -19,7 +19,9 @@ async def signup(user_data: UserCreate):
     try:
         # First, check if user already exists in MongoDB
         existing_user = await get_user_by_email(user_data.email)
-        if existing_user:
+        if (
+            existing_user is not None
+        ):  # Changed from "if existing_user:" to "if existing_user is not None:"
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="User with this email already exists",
@@ -59,7 +61,7 @@ async def signup(user_data: UserCreate):
 
         # Store in MongoDB
         db_user = await create_user(mongo_user_data)
-        if not db_user:
+        if db_user is None:  # Changed from "if not db_user:" to "if db_user is None:"
             logger.error("Failed to create user in MongoDB")
             # User was created in Auth0 but not in MongoDB
             # In a production app, you might want to delete the Auth0 user
@@ -103,7 +105,7 @@ async def signin(user_data: UserLogin):
         }
 
         # Add user info if available
-        if user:
+        if user is not None:  # Changed from "if user:" to "if user is not None:"
             if "_id" in user:
                 user["_id"] = str(user["_id"])
             response["user"] = user

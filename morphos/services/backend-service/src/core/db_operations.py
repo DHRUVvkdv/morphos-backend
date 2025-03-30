@@ -21,7 +21,7 @@ async def create_user(user_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         The created user document or None if error
     """
     db = get_db()
-    if not db:
+    if db is None:  # Changed from "if not db:" to "if db is None:"
         logger.error("Database connection not available")
         return None
 
@@ -80,7 +80,7 @@ async def get_user_by_auth0_id(auth0_id: str) -> Optional[Dict[str, Any]]:
         User document or None if not found
     """
     db = get_db()
-    if not db:
+    if db is None:  # Changed from "if not db:" to "if db is None:"
         return None
 
     try:
@@ -101,7 +101,7 @@ async def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         User document or None if not found
     """
     db = get_db()
-    if not db:
+    if db is None:  # Changed from "if not db:" to "if db is None:"
         return None
 
     try:
@@ -266,7 +266,8 @@ async def get_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
         List of user documents sorted by workout streak
     """
     db = get_db()
-    if not db:
+    if db is None:  # Changed from "if not db:" to "if db is None:"
+        logger.error("Database connection not available")
         return []
 
     try:
@@ -286,3 +287,157 @@ async def get_leaderboard(limit: int = 10) -> List[Dict[str, Any]]:
     except PyMongoError as e:
         logger.error(f"Error fetching leaderboard: {str(e)}")
         return []
+
+
+async def update_user_profile_by_email(
+    email: str, update_data: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """
+    Update user profile by email
+
+    Args:
+        email: User email
+        update_data: Data to update
+
+    Returns:
+        Updated user document or None if error
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database connection not available")
+        return None
+
+    # Add updated_at timestamp
+    update_data["updated_at"] = datetime.utcnow()
+
+    # Calculate BMI if height and weight are being updated
+    height = update_data.get("height")
+    weight = update_data.get("weight")
+
+    if height is not None or weight is not None:
+        # Get current user data to see if we have both height and weight
+        current_user = await get_user_by_email(email)
+        if current_user is not None:
+            # If height is being updated, use that; otherwise use existing height
+            actual_height = height if height is not None else current_user.get("height")
+            # If weight is being updated, use that; otherwise use existing weight
+            actual_weight = weight if weight is not None else current_user.get("weight")
+
+            # Calculate BMI if we have both values
+            if actual_height and actual_weight:
+                height_m = actual_height / 100  # Convert cm to meters
+                update_data["bmi"] = actual_weight / (height_m * height_m)
+
+    try:
+        # Find and update in one operation, returning the updated document
+        updated_user = db.users.find_one_and_update(
+            {"email": email},
+            {"$set": update_data},
+            return_document=ReturnDocument.AFTER,
+        )
+        logger.info(f"Updated profile for user with email: {email}")
+        return updated_user
+    except PyMongoError as e:
+        logger.error(f"Error updating user profile by email: {str(e)}")
+        return None
+
+
+async def update_user_achievements_by_email(
+    email: str, achievement_data: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """
+    Update user achievement metrics (workout streak, total workouts, etc.) by email
+
+    Args:
+        email: User email
+        achievement_data: Achievement data to update
+
+    Returns:
+        Updated user document or None if error
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database connection not available")
+        return None
+
+    valid_achievement_fields = {
+        "workout_streak",
+        "total_workouts",
+        "active_minutes",
+        "calories_burned",
+        "badges",
+    }
+
+    # Filter to only include valid achievement fields
+    filtered_data = {
+        k: v for k, v in achievement_data.items() if k in valid_achievement_fields
+    }
+
+    if not filtered_data:
+        logger.warning("No valid achievement fields to update")
+        return None
+
+    # Add updated_at timestamp
+    filtered_data["updated_at"] = datetime.utcnow()
+
+    try:
+        # For numeric fields that should be incremented, not replaced
+        increment_fields = {}
+        if "active_minutes" in filtered_data:
+            increment_fields["active_minutes"] = filtered_data.pop("active_minutes")
+        if "calories_burned" in filtered_data:
+            increment_fields["calories_burned"] = filtered_data.pop("calories_burned")
+        if "total_workouts" in filtered_data:
+            increment_fields["total_workouts"] = filtered_data.pop("total_workouts")
+
+        # Add badges (if any) to the badges array without duplicates
+        add_to_set = {}
+        if "badges" in filtered_data:
+            add_to_set["badges"] = {"$each": filtered_data.pop("badges")}
+
+        # Build the update operation
+        update_op = {}
+        if filtered_data:
+            update_op["$set"] = filtered_data
+        if increment_fields:
+            update_op["$inc"] = increment_fields
+        if add_to_set:
+            update_op["$addToSet"] = add_to_set
+
+        # Find and update in one operation, returning the updated document
+        updated_user = db.users.find_one_and_update(
+            {"email": email}, update_op, return_document=ReturnDocument.AFTER
+        )
+        logger.info(f"Updated achievements for user with email: {email}")
+        return updated_user
+    except PyMongoError as e:
+        logger.error(f"Error updating user achievements by email: {str(e)}")
+        return None
+
+
+async def delete_user_by_email(email: str) -> bool:
+    """
+    Delete a user by email
+
+    Args:
+        email: User email
+
+    Returns:
+        True if deleted successfully, False otherwise
+    """
+    db = get_db()
+    if db is None:
+        logger.error("Database connection not available")
+        return False
+
+    try:
+        result = db.users.delete_one({"email": email})
+        success = result.deleted_count > 0
+        if success:
+            logger.info(f"Deleted user with email: {email}")
+        else:
+            logger.warning(f"User with email {email} not found for deletion")
+        return success
+    except PyMongoError as e:
+        logger.error(f"Error deleting user by email: {str(e)}")
+        return False

@@ -31,13 +31,11 @@ def init_db():
             db = client[db_name]
             logger.info(f"Connected to MongoDB: {db_name}")
 
-            # Create indexes if they don't exist
-            db.users.create_index("email", unique=True)
-            db.users.create_index("auth0_id", unique=True)
-
+            # Don't perform boolean test on db object
             return db
         except Exception as e:
             logger.error(f"MongoDB connection error: {str(e)}")
+            return None
 
     logger.warning("MongoDB URI not provided, database features disabled")
     return None
@@ -46,6 +44,6 @@ def init_db():
 def get_db():
     """Get database connection"""
     global db
-    if not db:
+    if db is None:
         return init_db()
     return db
