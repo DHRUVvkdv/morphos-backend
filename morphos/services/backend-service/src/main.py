@@ -4,8 +4,50 @@ import logging
 import asyncio
 import os
 import json
+from api.auth_routes import router as auth_router
+from core.database import init_db
+from dotenv import load_dotenv
+import logging
+import pathlib
 
-# Import your existing manager
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("morphos-main")
+
+# Get absolute path to current directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+
+# Try to load .env from multiple possible locations
+possible_env_paths = [
+    os.path.join(current_dir, ".env"),
+    os.path.join(parent_dir, ".env"),
+    ".env",
+]
+
+env_loaded = False
+for env_path in possible_env_paths:
+    if os.path.exists(env_path):
+        logger.info(f"Loading .env from: {env_path}")
+        load_dotenv(env_path)
+        env_loaded = True
+        break
+
+if not env_loaded:
+    logger.warning("No .env file found in any expected location")
+
+# Print all environment variables for debugging
+logger.info("=== Environment Variables ===")
+for key, value in os.environ.items():
+    if key.startswith("AUTH0_"):
+        if "SECRET" in key:
+            logger.info(f"{key}: {value[:3]}... (truncated)")
+        else:
+            logger.info(f"{key}: {value}")
+
+init_db()
+
+
 from core.managers import ConnectionManager
 from api.routes import router
 
@@ -22,6 +64,8 @@ app = FastAPI(
     description="AI Workout Analysis API and WebSocket Service",
     version="0.1.0",
 )
+
+app.include_router(auth_router)
 
 # Configure CORS - simple approach
 app.add_middleware(
