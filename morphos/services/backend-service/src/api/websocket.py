@@ -292,3 +292,39 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
         logger.error(f"WebSocket error for client {client_id}: {str(e)}")
         heartbeat_task.cancel()
         manager.disconnect(client_id)
+
+
+@websocket_router.websocket("/ws-simple/{client_id}")
+async def simple_websocket(websocket: WebSocket, client_id: str):
+    """Simple WebSocket test endpoint with minimal code"""
+    logger.info(f"Simple WebSocket connection attempt from client: {client_id}")
+    logger.info(f"Headers: {dict(websocket.headers)}")
+    logger.info(f"Client host: {websocket.client.host}, port: {websocket.client.port}")
+    logger.info(f"Connection type: {websocket.scope.get('type')}")
+    logger.info(f"Connection path: {websocket.scope.get('path')}")
+
+    try:
+        # Accept the connection without any validation
+        await websocket.accept()
+        logger.info(f"Simple WebSocket connection accepted for client: {client_id}")
+
+        # Send a welcome message
+        await websocket.send_text("Connected to simple test endpoint")
+
+        # Simple echo service
+        while True:
+            try:
+                data = await websocket.receive_text()
+                logger.info(f"Received from {client_id}: {data}")
+                await websocket.send_text(f"Echo: {data}")
+            except WebSocketDisconnect:
+                logger.info(f"Simple WebSocket disconnected: {client_id}")
+                break
+            except Exception as e:
+                logger.error(f"Simple WebSocket error: {str(e)}")
+                break
+    except Exception as e:
+        logger.error(f"Simple WebSocket connection error: {str(e)}")
+        import traceback
+
+        logger.error(traceback.format_exc())

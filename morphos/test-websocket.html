@@ -33,6 +33,7 @@
         // Generate a random client ID
         const clientId = 'test-' + Math.floor(Math.random() * 1000);
         const wsUrl = `wss://morphos-backend-service-1020595365432.us-central1.run.app/ws/${clientId}`;
+        // const wsUrl = `ws://0.0.0.0:8080/ws-simple/${clientId}`;
         let socket;
         let connectionStartTime = null;
         let uptimeInterval = null;

@@ -50,12 +50,20 @@ EXEMPT_PATHS = ["/", "/health", "/docs", "/redoc", "/openapi.json"]
 
 
 async def verify_api_key(request: Request) -> None:
+    # Check if this is a WebSocket request by looking at the scope type
+    if request.scope.get("type") == "websocket":
+        logger.info("Skipping API key verification for WebSocket connection")
+        return
+
     # Skip API key verification for exempt paths
     if request.url.path in EXEMPT_PATHS or request.url.path.startswith("/static"):
         return
 
-    # Skip API key verification for WebSocket connections
-    if request.url.path.startswith("/ws/"):
+    # Skip API key verification for WebSocket paths
+    if request.url.path.startswith("/ws") or request.url.path.startswith("/ws-simple"):
+        logger.info(
+            f"Skipping API key verification for WebSocket path: {request.url.path}"
+        )
         return
 
     # Skip OPTIONS requests (for CORS preflight)

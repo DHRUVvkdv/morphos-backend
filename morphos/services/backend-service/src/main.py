@@ -38,6 +38,7 @@ from api.profile_routes import router as profile_router
 from core.database import init_db
 from api.exercise_routes import router as exercise_router
 from core.managers import ConnectionManager
+from api.websocket import websocket_router
 
 # Get absolute path to current directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -170,7 +171,6 @@ app = FastAPI(
     version="0.1.0",
     # Add security definition to OpenAPI schema
     swagger_ui_parameters={"defaultModelsExpandDepth": -1},
-    dependencies=[Depends(verify_api_key)],
 )
 
 app.openapi = custom_openapi
@@ -186,10 +186,13 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(auth_router)
-app.include_router(main_router)
-app.include_router(profile_router)
-app.include_router(exercise_router)
+app.include_router(auth_router, dependencies=[Depends(verify_api_key)])
+app.include_router(main_router, dependencies=[Depends(verify_api_key)])
+app.include_router(profile_router, dependencies=[Depends(verify_api_key)])
+app.include_router(exercise_router, dependencies=[Depends(verify_api_key)])
+
+# Include WebSocket router WITHOUT API key dependency
+app.include_router(websocket_router)
 
 
 # Initialize connection manager
@@ -236,70 +239,6 @@ async def root():
         "websocket_endpoint": "/ws/{client_id}",
         "database_connected": db is not None,
     }
-
-
-# WebSocket endpoint
-@app.websocket("/ws/{client_id}")
-async def websocket_endpoint(websocket: WebSocket, client_id: str):
-    # Accept the connection
-    try:
-        await websocket.accept()
-        logger.info(f"WebSocket connection accepted for client: {client_id}")
-
-        # Register with manager
-        await manager.connect(websocket, client_id)
-
-        # Start heartbeat task
-        heartbeat_task = asyncio.create_task(manager.heartbeat(client_id, interval=15))
-
-        try:
-            # Send welcome message
-            await websocket.send_json(
-                {"status": "connected", "message": "Connection established"}
-            )
-
-            while True:
-                # Receive data from client
-                data = await websocket.receive_text()
-
-                # Handle JSON messages separately
-                if data.startswith("{"):
-                    try:
-                        json_data = json.loads(data)
-                        # Process JSON message (could be control commands)
-                        await websocket.send_json(
-                            {
-                                "status": "ok",
-                                "type": "json_response",
-                                "message": "JSON data received and processed",
-                            }
-                        )
-                        continue
-                    except json.JSONDecodeError:
-                        pass  # Not valid JSON, process as regular message
-
-                # Echo back for video/binary data
-                await websocket.send_json(
-                    {
-                        "status": "ok",
-                        "type": "data_received",
-                        "received_data_length": len(data),
-                        "message": "Data received successfully",
-                    }
-                )
-
-        except WebSocketDisconnect:
-            logger.info(f"WebSocket disconnected for client {client_id}")
-            manager.disconnect(client_id)
-            heartbeat_task.cancel()
-        except Exception as e:
-            logger.error(f"Error in WebSocket for client {client_id}: {str(e)}")
-            logger.error(traceback.format_exc())
-            manager.disconnect(client_id)
-            heartbeat_task.cancel()
-    except Exception as e:
-        logger.error(f"Error in websocket_endpoint for client {client_id}: {str(e)}")
-        logger.error(traceback.format_exc())
 
 
 if __name__ == "__main__":
